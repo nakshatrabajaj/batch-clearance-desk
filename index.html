@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Batch Clearance Desk</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<style>
+/* Layout: one working column of three sequential stations (pendency check → graphics removal → questions), each a ledger-style panel. */
+:root{
+  --bg:#eef1f3; --panel:#ffffff; --ink:#17232b; --muted:#5b6b75; --line:#d3dade; --soft:#f5f7f8;
+  --accent:#1d6b57; --accent-ink:#ffffff; --accent-soft:#e3f0ec;
+  --ok:#1f7a45; --ok-soft:#e2f2e8; --warn:#a2610b; --warn-soft:#fbefd9; --bad:#b03a2e; --bad-soft:#f8e3e0;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11181d; --panel:#182229; --ink:#e3e9ec; --muted:#93a3ad; --line:#2b3a43; --soft:#1e2a32;
+  --accent:#4fb393; --accent-ink:#0c1a15; --accent-soft:#18332b;
+  --ok:#5cc189; --ok-soft:#173226; --warn:#e3a54a; --warn-soft:#352812; --bad:#ec7a6e; --bad-soft:#3a1d1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11181d; --panel:#182229; --ink:#e3e9ec; --muted:#93a3ad; --line:#2b3a43; --soft:#1e2a32;
+  --accent:#4fb393; --accent-ink:#0c1a15; --accent-soft:#18332b;
+  --ok:#5cc189; --ok-soft:#173226; --warn:#e3a54a; --warn-soft:#352812; --bad:#ec7a6e; --bad-soft:#3a1d1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:700;font-size:30px;letter-spacing:.01em;margin:0;text-wrap:balance}
+.sub{color:var(--muted);margin:2px 0 0;max-width:62ch}
+.flow{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.flow span{border:1px solid var(--line);border-radius:999px;padding:2px 10px;background:var(--panel)}
+.flow span.done{border-color:var(--accent);color:var(--accent)}
+section.station{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.st-head{display:flex;gap:14px;align-items:baseline;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.st-no{font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 6px}
+.st-head h2{font-family:var(--display);font-weight:600;font-size:20px;margin:0}
+.st-head p{margin:0;color:var(--muted);flex-basis:100%;max-width:75ch}
+.st-body{padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.drops{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.drop{position:relative;border:1.5px dashed var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:4px;background:var(--soft);cursor:pointer;transition:border-color .15s}
+.drop:hover,.drop.over,.drop:focus-within{border-color:var(--accent)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.drop .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.drop .fname{font-weight:600;word-break:break-word}
+.drop .meta{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.drop.loaded{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
+.drop.err{border-color:var(--bad);background:var(--bad-soft)}
+.stats{display:flex;flex-wrap:wrap;gap:10px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:130px}
+.stat b{display:block;font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.hi{border-color:var(--accent)}
+.stat.hi b{color:var(--accent)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:inherit;font-weight:600;border-radius:6px;padding:8px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input[type=search],select,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+input[type=search]{flex:1 1 220px;min-width:0}
+.note{font-size:13px;color:var(--muted)}
+.note.bad{color:var(--bad)} .note.ok{color:var(--ok)}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:8px;max-height:460px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;background:var(--soft);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;z-index:1}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.code{font-family:var(--mono);font-size:12px;color:var(--muted)}
+td.prod{font-weight:600;white-space:normal;min-width:160px}
+.pill{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px}
+.pill.yes{background:var(--ok-soft);color:var(--ok)} .pill.no{background:var(--bad-soft);color:var(--bad)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.neutral{background:var(--soft);color:var(--muted);border:1px solid var(--line)}
+.grid-rmpm{border-collapse:collapse;width:auto;min-width:min(100%,560px)}
+.grid-rmpm td,.grid-rmpm th{padding:7px 14px}
+.grid-rmpm td.click{cursor:pointer;text-decoration:underline dotted var(--muted);text-underline-offset:3px}
+.grid-rmpm td.click:hover{background:var(--accent-soft);color:var(--accent)}
+.grid-rmpm td.click.on{background:var(--accent);color:var(--accent-ink);text-decoration:none}
+.listhead{justify-content:space-between;scroll-margin-top:16px}
+.cap{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cap b{color:var(--ink)}
+button.mini{font-size:12px;padding:2px 8px}
+#t2 tbody tr.line{cursor:pointer}
+#t2 tbody tr.line:hover td{background:var(--soft)}
+#t2 tbody tr.line.open td{background:var(--accent-soft)}
+td.shorts{white-space:normal;min-width:220px;font-size:12.5px}
+.tag{display:inline-block;font-size:11px;font-weight:600;border-radius:4px;padding:0 5px;margin-right:4px}
+.tag.rm{background:var(--bad-soft);color:var(--bad)} .tag.pm{background:var(--warn-soft);color:var(--warn)}
+tr.detail > td{background:var(--soft);padding:10px 14px;white-space:normal}
+tr.detail table{background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.shortbox{margin-top:22px;border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:12px}
+.shortbox h3{font-family:var(--display);font-weight:600;font-size:17px;margin:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.segb{border:0;border-radius:0;background:transparent;color:var(--ink);font-weight:500;padding:6px 12px}
+.segb.on{background:var(--accent);color:var(--accent-ink)}
+#tS tbody tr{cursor:pointer}
+#tS tbody tr:hover td{background:var(--soft)}
+#tS tbody tr.on td{background:var(--accent-soft)}
+td.bad{color:var(--bad);font-weight:600}
+.empty{padding:22px;text-align:center;color:var(--muted)}
+.chat{display:flex;flex-direction:column;gap:12px}
+.msgs{display:flex;flex-direction:column;gap:12px;max-height:560px;overflow-y:auto}
+.msg{border-radius:8px;padding:10px 14px;max-width:100%;min-width:0;overflow-x:auto}
+.msg.user{align-self:flex-end;background:var(--accent-soft);max-width:80%}
+.msg.bot{border:1px solid var(--line);background:var(--panel)}
+.msg.bot table{font-size:12.5px;margin:6px 0}
+.msg p{margin:.3em 0} .msg ul,.msg ol{margin:.3em 0;padding-left:1.3em}
+.msg code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:0 4px;border-radius:3px}
+.msg .tool{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.ask{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.ask textarea{flex:1 1 260px;min-width:0;resize:vertical;min-height:44px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{font-weight:500;font-size:12.5px;padding:4px 10px;background:var(--soft);color:var(--ink);border-color:var(--line)}
+.busy{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.busy{animation:none}}
+.locked{opacity:.55}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Batch Clearance Desk</h1>
+      <p class="sub">Compare the FINAMAN pendency against today's batch clearance, take out brands still with Graphics, and see what each brand is short of. Files are read in your browser and never uploaded.</p>
+    </div>
+    <div class="flow" aria-label="Progress">
+      <span id="f1">1 · Pendency check</span><span id="f2">2 · Graphics removal</span><span id="f3">3 · Questions</span>
+    </div>
+  </header>
+
+  <!-- STEP 1 -->
+  <section class="station" id="s1">
+    <div class="st-head">
+      <span class="st-no">STEP 1</span><h2>Pendency vs batch clearance</h2>
+      <p>Upload the Total Pending report and the Batch Clearance export. Each pending order is matched to a batch clearance line by product code and quantity. You get every order that has no match, in the batch clearance format, ready for creating work orders.</p>
+    </div>
+    <div class="st-body">
+      <div class="drops">
+        <label class="drop" id="dropP"><input type="file" id="fileP" accept=".xlsx,.xls"><span class="lbl">Total Pending (.xlsx)</span><span class="fname">Choose or drop file</span><span class="meta">Pending order report: Order No, Product Code, Planned Qty</span></label>
+        <label class="drop" id="dropB"><input type="file" id="fileB" accept=".xlsx,.xls"><span class="lbl">Batch Clearance (.xlsx)</span><span class="fname">Choose or drop file</span><span class="meta">Concise + Details sheets</span></label>
+      </div>
+      <div id="r1" hidden>
+        <div class="stats" id="stats1"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="dl1">Download Excel</button>
+          <span class="note" id="dl1note"></span>
+        </div>
+        <div class="tablebox" style="margin-top:12px"><table id="t1"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="station locked" id="s2">
+    <div class="st-head">
+      <span class="st-no">STEP 2</span><h2>Remove brands in Graphics</h2>
+      <p>Upload the Graphics CSV. Every batch clearance line whose brand appears in the BRAND column is removed. The rest is your remaining pendency, in the batch clearance format.</p>
+    </div>
+    <div class="st-body">
+      <div class="drops">
+        <label class="drop" id="dropG"><input type="file" id="fileG" accept=".csv,.xlsx" disabled><span class="lbl">Graphics (.csv)</span><span class="fname">Load the Batch Clearance first</span><span class="meta">BF_GRAPHICS export with a BRAND column</span></label>
+      </div>
+      <div id="r2" hidden>
+        <div class="stats" id="stats2"></div>
+        <div style="margin-top:14px;overflow-x:auto"><table class="grid-rmpm" id="grid2"></table></div>
+        <p class="note" style="margin:6px 0 0">Click any number to see its list of brands below.</p>
+        <div class="row" style="margin-top:12px">
+          <button id="dl2">Download remaining</button>
+          <button class="ghost" id="dl2r">Download removed</button>
+          <span class="note" id="dl2note"></span>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <select id="view2" aria-label="Which lines to show">
+            <option value="remaining">Remaining lines</option>
+            <option value="removed">Removed (in Graphics)</option>
+            <option value="all">All batch clearance lines</option>
+            <option value="near">Kept, similar name in Graphics</option>
+          </select>
+          <input type="search" id="q2" placeholder="Search brand, work order or product code">
+        </div>
+        <div class="row listhead" style="margin-top:12px">
+          <span id="cap2" class="cap"></span>
+          <button class="ghost" id="dl2s">Download this list</button>
+        </div>
+        <div class="tablebox" style="margin-top:8px"><table id="t2"></table></div>
+        <p class="note" style="margin:6px 0 0">Click a line to see every material that is short for it.</p>
+
+        <div class="shortbox" id="short2">
+          <div class="row listhead">
+            <div>
+              <h3>What's short in this list</h3>
+              <span class="cap" id="capS"></span>
+            </div>
+            <button id="dlS">Download shortage report</button>
+          </div>
+          <div class="row">
+            <div class="seg" role="group" aria-label="Material type">
+              <button class="segb on" data-t="all">RM + PM</button><button class="segb" data-t="Raw Material">RM only</button><button class="segb" data-t="Packing Material">PM only</button>
+            </div>
+            <input type="search" id="qS" placeholder="Search material name or item code">
+          </div>
+          <div class="tablebox"><table id="tS"></table></div>
+          <p class="note" style="margin:0">Click a material to see each brand's requirement.</p>
+          <div id="brandS" hidden>
+            <div class="row listhead">
+              <span class="cap" id="capB"></span>
+              <button class="ghost" id="dlB">Download this material</button>
+            </div>
+            <div class="tablebox" style="margin-top:8px"><table id="tB"></table></div>
+          </div>
+          <span class="note" id="dlSnote"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="station locked" id="s3">
+    <div class="st-head">
+      <span class="st-no">STEP 3</span><h2>Ask about the files</h2>
+      <p>Ask anything about the uploaded files. Claude looks up the exact lines, materials and shortages before it answers.</p>
+    </div>
+    <div class="st-body chat">
+      <div class="msgs" id="msgs"><div class="empty" id="chatEmpty">Upload at least one file to start asking questions.</div></div>
+      <div class="chips" id="chips">
+        <button data-q="Which remaining brands are short of Iso Propyl Alcohol I.P? Give a table.">Short of IPA</button>
+        <button data-q="List the remaining brands where RM and PM are both clear.">RM + PM clear</button>
+        <button data-q="Which raw materials are short for the most work orders? Top 10.">Top RM shortages</button>
+        <button data-q="What is the RM and PM status of HQBEX-200?">Status of a brand</button>
+      </div>
+      <div class="ask">
+        <textarea id="askBox" rows="2" placeholder="e.g. Which removed brands are at the Corrections step in Graphics?" disabled></textarea>
+        <button id="askBtn" disabled>Ask</button>
+        <button class="ghost" id="stopBtn" hidden>Stop</button>
+      </div>
+      <p class="note" id="askNote"></p>
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+/* ---------- state ---------- */
+const S = { P:null, B:null, G:null, step1:null, step2:null, rmpmFilter:null, turns:[] };
+const $ = id => document.getElementById(id);
+// Hosted outside a Claude viewer (e.g. GitHub Pages): no Claude questions, downloads go through the browser
+const STANDALONE = !window.claude?.use;
+if (STANDALONE){ $("s3").hidden = true; $("f3").hidden = true; }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tick = () => new Promise(r => setTimeout(r, 30));
+const norm = s => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const lineKey = r => `${r[0]}|${String(r[4]).trim()}|${r[6]}`;
+const fmtN = n => (typeof n === "number" ? (Math.round(n*10000)/10000).toLocaleString("en-IN") : (n ?? ""));
+function serialToDate(v){
+  if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5));
+  if (v instanceof Date) return v;
+  return v; // leave text as is
+}
+function fmtDate(v){
+  const d = serialToDate(v);
+  if (!(d instanceof Date) || isNaN(d)) return v ?? "";
+  return `${String(d.getUTCDate()).padStart(2,"0")}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${d.getUTCFullYear()}`;
+}
+
+/* ---------- reading FINAMAN batch clearance exports ---------- */
+function sheetRows(ws){ return XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null, blankrows:false}); }
+function findSheet(wb, name){ const n = wb.SheetNames.find(s => s.trim().toLowerCase() === name); return n ? wb.Sheets[n] : null; }
+function parseBlock(rows, ncol){
+  const hi = rows.findIndex(r => r && String(r[0] ?? "").trim().toLowerCase().startsWith("wrkord"));
+  if (hi < 0) return null;
+  const data = [];
+  for (let i = hi+1; i < rows.length; i++){
+    const r = rows[i]; if (!r) continue;
+    if (typeof r[0] === "number" || (/^\d+$/.test(String(r[0] ?? "").trim()))) {
+      const row = r.slice(0, ncol); while (row.length < ncol) row.push(null);
+      if (typeof row[0] !== "number") row[0] = Number(String(row[0]).trim());
+      data.push(row);
+    }
+  }
+  const footer = [...rows].reverse().find(r => r && typeof r[0] === "string" && /software|finaman/i.test(r[0]));
+  return { header: rows[hi].slice(0, ncol), data, company: rows[0]?.[0] ?? "", title: rows[1]?.[0] ?? "", footer: footer?.[0] ?? "" };
+}
+async function readBC(file, wbIn){
+  let wb = wbIn;
+  if (!wb){ const buf = await file.arrayBuffer(); await tick(); wb = XLSX.read(buf, {type:"array", dense:true}); }
+  const cs = findSheet(wb, "concise"), ds = findSheet(wb, "details");
+  if (!cs && !ds) throw new Error("This file has no Concise or Details sheet. Upload the FINAMAN batch clearance export.");
+  const details = ds ? parseBlock(sheetRows(ds), 17) : null;
+  let concise = cs ? parseBlock(sheetRows(cs), 9) : null;
+  if (!concise && details){ // rebuild concise from details when only Details exists
+    const seen = new Map();
+    for (const r of details.data){ const k = lineKey(r); if (!seen.has(k)) seen.set(k, [r[0],r[1],r[2],r[3],r[4],r[5],r[6],r[15],r[16]]); }
+    concise = { header:["Wrkord. No.","Wrkord. Dt.","Delivery Date","Generic Name","Product Code","Product Name","Wrkord. Qty","Clear (RM)","Clear (PM)"], data:[...seen.values()], company:details.company, title:details.title.replace(/DETAILS/i,"CONCISE"), footer:details.footer };
+  }
+  if (!concise || !concise.data.length) throw new Error("No work order rows found. Check that this is a batch clearance export.");
+  const byKey = new Map();
+  if (details) for (const r of details.data){ const k = lineKey(r); (byKey.get(k) || byKey.set(k, []).get(k)).push(r); }
+  return { name:file.name, concise, details, detailByKey:byKey };
+}
+
+/* ---------- Total Pending order report (Approval Date, Order No, Product Code …) ---------- */
+// Pending orders become concise-shaped rows: [WO(blank), date, delivery, generic, code, product, planned qty, RM, PM, order, party, type, pending qty]
+async function readPendingOrBC(file){
+  const buf = await file.arrayBuffer(); await tick();
+  const wb = XLSX.read(buf, {type:"array", dense:true});
+  for (const sn of wb.SheetNames){
+    const rows = sheetRows(wb.Sheets[sn]);
+    const hi = rows.findIndex(r => r && r.some(c => /^order\s*no/i.test(String(c ?? "").trim())) && r.some(c => /^product\s*code/i.test(String(c ?? "").trim())));
+    if (hi < 0) continue;
+    const H = rows[hi].map(c => String(c ?? "").trim().toLowerCase());
+    const col = (...names) => H.findIndex(h => names.includes(h));
+    const c = { date:col("approval date","order date","date"), order:col("order no","order no."), code:col("product code"), product:col("product name"), party:col("party name"),
+      type:col("product type"), planned:col("planned qty"), pending:col("pending qty"), generic:col("generic name") };
+    if (c.code < 0 || c.order < 0) continue;
+    const data = rows.slice(hi+1).filter(r => r && String(r[c.order] ?? "").trim() && String(r[c.code] ?? "").trim())
+      .map(r => [null, r[c.date] ?? null, "  -   -", c.generic>=0 ? r[c.generic] : "", String(r[c.code]).trim(), c.product>=0 ? r[c.product] : "",
+                 c.planned>=0 ? r[c.planned] : null, null, null, String(r[c.order]).trim(), c.party>=0 ? r[c.party] : "", c.type>=0 ? r[c.type] : "", c.pending>=0 ? r[c.pending] : null]);
+    if (!data.length) throw new Error("No orders found under the header row.");
+    return { kind:"orders", name:file.name, concise:{ data, company: rows[0]?.[0] ?? "", title:"", footer:"" }, details:null, detailByKey:new Map() };
+  }
+  const bc = await readBC(file, wb);
+  bc.kind = "bc"; return bc;
+}
+
+/* ---------- Graphics CSV ---------- */
+async function readGraphics(file){
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:"array", raw:true, codepage:65001});
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:false, defval:""});
+  const hi = rows.findIndex(r => r.some(c => String(c).replace(/^﻿/,"").trim().toUpperCase() === "BRAND"));
+  if (hi < 0) throw new Error("No BRAND column found in this file.");
+  const H = rows[hi].map(c => String(c).replace(/^﻿/,"").trim());
+  const col = name => H.findIndex(h => h.toUpperCase() === name.toUpperCase());
+  const ci = { brand:col("BRAND"), step:col("Step Name"), seq:col("Step Sequence"), status:col("Status"), doer:col("Doer Name"), planned:col("Planned Date"), type:col("TYPE"), qty:col("Qty"), accepted:col("Accepted_Date") };
+  const items = rows.slice(hi+1).filter(r => String(r[ci.brand] ?? "").trim()).map(r => ({
+    text: String(r[ci.brand]).trim(), brand: brandOf(String(r[ci.brand])),
+    step: ci.step>=0 ? r[ci.step] : "", seq: ci.seq>=0 ? r[ci.seq] : "", status: ci.status>=0 ? r[ci.status] : "",
+    doer: ci.doer>=0 ? r[ci.doer] : "", planned: ci.planned>=0 ? r[ci.planned] : "", type: ci.type>=0 ? r[ci.type] : "",
+    qty: ci.qty>=0 ? r[ci.qty] : "", accepted: ci.accepted>=0 ? r[ci.accepted] : "" }));
+  return { name:file.name, items };
+}
+function brandOf(s){
+  s = s.trim();
+  const parts = s.split(/\s+-\s*|\s*-\s+/);
+  if (parts.length > 1) return parts[0].trim();
+  return s.split(/\s*\(|\s+\d+\s*MM|\s+ALU|\s+\d+\s*ML/i)[0].trim();
+}
+
+/* ---------- Step 1 ---------- */
+function runStep1(){
+  if (!S.P || !S.B) return;
+  const orders = S.P.kind === "orders";
+  let tagged;
+  if (orders){
+    // match each pending order to one batch clearance line with the same product code and quantity
+    const pool = new Map(), codeQty = new Map();
+    for (const r of S.B.concise.data){
+      const k = `${String(r[4]).trim()}|${r[6]}`; pool.set(k, (pool.get(k) || 0) + 1);
+      const c = String(r[4]).trim(); (codeQty.get(c) || codeQty.set(c, []).get(c)).push(r[6]);
+    }
+    tagged = [];
+    for (const r of S.P.concise.data){
+      const k = `${r[4]}|${r[6]}`;
+      if (pool.get(k) > 0){ pool.set(k, pool.get(k) - 1); continue; }
+      const q = codeQty.get(r[4]);
+      tagged.push({ r, why: q ? `Qty differs (BC: ${q.join(", ")})` : "No work order" });
+    }
+  } else {
+    const bKeys = new Set(S.B.concise.data.map(lineKey));
+    const bWO = new Set(S.B.concise.data.map(r => r[0]));
+    tagged = S.P.concise.data.filter(r => !bKeys.has(lineKey(r))).map(r => ({ r, why: bWO.has(r[0]) ? "Qty differs" : "No work order" }));
+  }
+  S.step1 = { lines: tagged };
+  $("r1").hidden = false;
+  const noWO = tagged.filter(t => t.why === "No work order").length;
+  $("stats1").innerHTML =
+    stat(S.P.concise.data.length, orders ? "Pending orders" : "Pendency lines") + stat(S.B.concise.data.length, "Batch clearance lines") +
+    stat(tagged.length, "Pending, not in BC", true) + stat(noWO, "No work order yet") + stat(tagged.length - noWO, "Work order at a different qty");
+  const t = $("t1");
+  if (!tagged.length){ t.innerHTML = `<tr><td class="empty">Every pending order is in the batch clearance.</td></tr>`; $("dl1").disabled = true; return; }
+  $("dl1").disabled = false;
+  const pill = why => `<span class="pill ${why==="No work order"?"warn":"neutral"}">${esc(why)}</span>`;
+  t.innerHTML = orders
+    ? `<thead><tr><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th><th>Status</th></tr></thead><tbody>` +
+      tagged.map(({r,why}) => `<tr><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td><td>${pill(why)}</td></tr>`).join("") + `</tbody>`
+    : `<thead><tr><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Status</th></tr></thead><tbody>` +
+      tagged.map(({r,why}) => `<tr><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td>${pill(why)}</td></tr>`).join("") + `</tbody>`;
+  $("f1").classList.add("done");
+}
+const stat = (n, label, hi) => `<div class="stat${hi?" hi":""}"><b>${Number(n).toLocaleString("en-IN")}</b><span>${esc(label)}</span></div>`;
+const yn = v => v === "Yes" ? `<span class="pill yes">Yes</span>` : v === "No" ? `<span class="pill no">No</span>` : esc(v);
+
+/* ---------- Step 2 ---------- */
+function runStep2(){
+  if (!S.B || !S.G) return;
+  const gb = new Map(), gbp = new Map();
+  for (const it of S.G.items){ const k = norm(it.brand); if (k && !gb.has(k)) gb.set(k, it.brand); }
+  for (const v of gb.values()){ const k = norm(v.replace(/\(.*?\)/g, "")); if (k && !gbp.has(k)) gbp.set(k, v); }
+  const removed = [], remaining = [], near = [];
+  for (const r of S.B.concise.data){
+    const p = norm(r[5]), pp = norm(String(r[5] ?? "").replace(/\(.*?\)/g, ""));
+    const m = gb.get(p) || gb.get(pp) || gbp.get(pp);
+    if (m){ removed.push({r, match:m}); continue; }
+    remaining.push({r});
+    if (p.length >= 3){
+      const sim = [];
+      for (const [k,v] of gb){ if (k.length >= 5 && (k.startsWith(p) || p.startsWith(k))){ sim.push(v); if (sim.length >= 4) break; } }
+      if (sim.length) near.push({r, match: sim.join(", ")});
+    }
+  }
+  S.step2 = { removed, remaining, near, gbCount: gb.size };
+  S.rmpmFilter = null;
+  $("r2").hidden = false;
+  $("stats2").innerHTML = stat(S.B.concise.data.length, "Batch clearance lines") + stat(gb.size, "Brands in Graphics") +
+    stat(removed.length, "Removed (in Graphics)") + stat(remaining.length, "Remaining lines", true) +
+    stat(new Set(remaining.map(x => x.r[5])).size, "Remaining brands") + stat(near.length, "Kept, similar name");
+  drawGrid2(); drawTable2();
+  $("f2").classList.add("done");
+}
+const VIEW_NAME = { remaining:"Remaining", removed:"Removed (in Graphics)", all:"All batch clearance lines", near:"Kept, similar name in Graphics" };
+function drawGrid2(){
+  const {removed, remaining} = S.step2;
+  const cnt = (arr, a, b) => arr.filter(x => x.r[7] === a && x.r[8] === b).length;
+  const combos = [["Yes","Yes"],["Yes","No"],["No","Yes"],["No","No"]];
+  const f = S.rmpmFilter, v = $("view2").value;
+  const cell = (n, view, a, b, bold) => {
+    const on = v === view && (a ? (f && f[0]===a && f[1]===b) : !f);
+    return `<td class="num click${on?" on":""}" data-view="${view}" data-rm="${a||""}" data-pm="${b||""}" tabindex="0" role="button" aria-label="Show ${n} lines">${bold?`<b>${n}</b>`:n}</td>`;
+  };
+  let h = `<thead><tr><th>RM clear</th><th>PM clear</th><th class="num">Remaining</th><th class="num">Removed (in Graphics)</th><th class="num">Total</th></tr></thead><tbody>`;
+  for (const [a,b] of combos){
+    const x = cnt(remaining,a,b), y = cnt(removed,a,b);
+    h += `<tr><td>${yn(a)}</td><td>${yn(b)}</td>${cell(x,"remaining",a,b)}${cell(y,"removed",a,b)}${cell(x+y,"all",a,b)}</tr>`;
+  }
+  h += `<tr><td colspan="2"><b>Total</b></td>${cell(remaining.length,"remaining",null,null,true)}${cell(removed.length,"removed",null,null,true)}${cell(remaining.length+removed.length,"all",null,null,true)}</tr></tbody>`;
+  $("grid2").innerHTML = h;
+}
+function currentList2(){
+  const v = $("view2").value, q = $("q2").value.trim().toUpperCase();
+  let list = v === "removed" ? S.step2.removed : v === "near" ? S.step2.near : v === "all" ? [...S.step2.remaining, ...S.step2.removed].sort((a,b) => S.B.concise.data.indexOf(a.r) - S.B.concise.data.indexOf(b.r)) : S.step2.remaining;
+  if (S.rmpmFilter) list = list.filter(x => x.r[7] === S.rmpmFilter[0] && x.r[8] === S.rmpmFilter[1]);
+  if (q) list = list.filter(x => String(x.r[5]).toUpperCase().includes(q) || String(x.r[0]).includes(q) || String(x.r[4]).toUpperCase().includes(q) || String(x.match||"").toUpperCase().includes(q));
+  return list;
+}
+function drawTable2(){
+  const v = $("view2").value, list = currentList2();
+  const f = S.rmpmFilter;
+  $("cap2").innerHTML = `<b>${list.length.toLocaleString("en-IN")} lines</b> · ${esc(VIEW_NAME[v])}${f ? ` · RM ${f[0]} / PM ${f[1]}` : ""}` +
+    (f ? ` <button class="ghost mini" id="clr2">Clear RM/PM filter</button>` : "");
+  const extra = v === "remaining" ? "" : `<th>${v==="near"?"Similar Graphics brand":"Graphics brand"}</th>`;
+  const shown = list.slice(0, 400);
+  S.shown2 = shown;
+  $("t2").innerHTML = list.length ? `<thead><tr><th class="num">#</th><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Short items</th>${extra}</tr></thead><tbody>` +
+    shown.map(({r,match},i) => `<tr class="line" data-i="${i}"><td class="num code">${i+1}</td><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td class="shorts">${shortSummary(r)}</td>${v==="remaining"?"":`<td>${match ? esc(match) : `<span class="note">Not in Graphics</span>`}</td>`}</tr>`).join("") +
+    (list.length > shown.length ? `<tr><td colspan="10" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "") + `</tbody>`
+    : `<tr><td class="empty">No lines match.</td></tr>`;
+  $("dl2s").disabled = !list.length;
+  S.matSel = null;
+  drawShort();
+}
+
+/* ---------- shortages ---------- */
+const shortRowsOf = r => (S.B?.detailByKey.get(lineKey(r)) || []).filter(d => (d[14] || 0) > 0);
+const itemName = d => String(d[9] ?? "").trim();
+const isRM = d => /raw/i.test(String(d[8]));
+function shortSummary(r){
+  if (!S.B?.details) return `<span class="note">No Details sheet</span>`;
+  const sh = shortRowsOf(r);
+  if (!sh.length) return `<span class="note">Nothing short</span>`;
+  const rm = sh.filter(isRM), pm = sh.filter(d => !isRM(d));
+  const part = (arr, cls, label) => arr.length ? `<span class="tag ${cls}">${label} ${arr.length}</span>${esc(arr.slice(0,2).map(itemName).join(", "))}${arr.length > 2 ? ` +${arr.length-2} more` : ""}` : "";
+  return [part(rm,"rm","RM"), part(pm,"pm","PM")].filter(Boolean).join("<br>");
+}
+function materialTable(rows){
+  return `<table><thead><tr><th>Type</th><th>Item Code</th><th>Item Name</th><th>Unit</th><th class="num">Opn. Stock</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">Shortage</th></tr></thead><tbody>` +
+    rows.map(d => `<tr><td>${isRM(d) ? `<span class="tag rm">RM</span>` : `<span class="tag pm">PM</span>`}</td><td class="code">${esc(d[7])}</td><td>${esc(itemName(d))}</td><td>${esc(d[10])}</td><td class="num">${fmtN(d[11])}</td><td class="num">${fmtN(d[12])}</td><td class="num">${fmtN(d[13])}</td><td class="num bad">${fmtN(d[14])}</td></tr>`).join("") + `</tbody></table>`;
+}
+$("t2").addEventListener("click", e => {
+  const tr = e.target.closest("tr.line"); if (!tr) return;
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("detail")){ next.remove(); tr.classList.remove("open"); return; }
+  const {r} = S.shown2[Number(tr.dataset.i)];
+  const sh = shortRowsOf(r);
+  const d = document.createElement("tr"); d.className = "detail";
+  d.innerHTML = `<td colspan="10">${sh.length ? `<b>${esc(r[5])}</b>, WO ${r[0]}: ${sh.length} item${sh.length>1?"s":""} short<div class="tablebox" style="max-height:none;margin-top:6px">${materialTable(sh)}</div>` : `<span class="note">Every material for this line is reserved. Nothing is short.</span>`}</td>`;
+  tr.after(d); tr.classList.add("open");
+});
+
+// aggregate shortages for the lines currently listed
+let shortType = "all";
+function stockByItem(){
+  if (S._stock && S._stock.src === S.B) return S._stock.map;
+  const m = new Map();
+  for (const d of S.B.details.data) if (!m.has(d[7])) m.set(d[7], d[11]);  // opening stock on the item's first row = stock before any allocation
+  S._stock = { src:S.B, map:m }; return m;
+}
+function aggregate(list){
+  const m = new Map();
+  for (const {r} of list){
+    for (const d of shortRowsOf(r)){
+      if (shortType !== "all" && d[8] !== shortType) continue;
+      const e = m.get(d[7]) || {code:d[7], name:itemName(d), type:d[8], unit:d[10], lines:[], required:0, reserved:0, shortage:0};
+      e.lines.push({r, d}); e.required += d[12] || 0; e.reserved += d[13] || 0; e.shortage += d[14] || 0;
+      m.set(d[7], e);
+    }
+  }
+  const stock = stockByItem();
+  return [...m.values()].map(e => ({...e, stock: stock.get(e.code) ?? null})).sort((a,b) => b.lines.length - a.lines.length || b.shortage - a.shortage);
+}
+const r4 = n => Math.round(n * 10000) / 10000;
+function drawShort(){
+  const box = $("short2");
+  if (!S.B?.details){ box.hidden = true; return; }
+  box.hidden = false;
+  const list = currentList2();
+  let mats = aggregate(list);
+  S.mats = mats;
+  const q = norm($("qS").value);
+  if (q) mats = mats.filter(m => norm(m.name).includes(q) || norm(m.code).includes(q));
+  const shortLines = list.filter(x => shortRowsOf(x.r).length).length;
+  $("capS").innerHTML = `<b>${mats.length} materials short</b> · across ${shortLines} of the ${list.length} lines listed above`;
+  $("dlS").disabled = !S.mats.length;
+  $("tS").innerHTML = mats.length ? `<thead><tr><th>Type</th><th>Item Code</th><th>Item Name</th><th>Unit</th><th class="num">Brands short</th><th class="num">Required (these brands)</th><th class="num" title="Total stock of this item before it is allocated across all work orders">Stock in hand (all WOs)</th><th class="num">Total shortage</th></tr></thead><tbody>` +
+    mats.map(m => `<tr data-code="${esc(m.code)}" class="${S.matSel===m.code?"on":""}"><td>${/raw/i.test(m.type) ? `<span class="tag rm">RM</span>` : `<span class="tag pm">PM</span>`}</td><td class="code">${esc(m.code)}</td><td class="prod">${esc(m.name)}</td><td>${esc(m.unit)}</td><td class="num">${m.lines.length}</td><td class="num">${fmtN(r4(m.required))}</td><td class="num">${fmtN(m.stock)}</td><td class="num bad">${fmtN(r4(m.shortage))}</td></tr>`).join("") + `</tbody>`
+    : `<tr><td class="empty">Nothing is short for the lines listed above.</td></tr>`;
+  drawBrandwise();
+}
+function drawBrandwise(){
+  const m = S.matSel && S.mats.find(x => x.code === S.matSel);
+  $("brandS").hidden = !m;
+  if (!m) return;
+  $("capB").innerHTML = `<b>${esc(m.name)}</b> (${esc(m.code)}) · ${m.lines.length} brand${m.lines.length === 1 ? "" : "s"} short · required ${fmtN(r4(m.required))} ${esc(m.unit)} · stock in hand ${fmtN(m.stock)} · shortage ${fmtN(r4(m.shortage))} ${esc(m.unit)}`;
+  $("tB").innerHTML = `<thead><tr><th class="num">#</th><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th class="num">Required</th><th class="num">Reserved</th><th class="num">Shortage</th><th>Clear (RM)</th><th>Clear (PM)</th></tr></thead><tbody>` +
+    m.lines.map(({r,d},i) => `<tr><td class="num code">${i+1}</td><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td class="num">${fmtN(d[12])}</td><td class="num">${fmtN(d[13])}</td><td class="num bad">${fmtN(d[14])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td></tr>`).join("") +
+    `<tr><td colspan="6"><b>Total</b></td><td class="num"><b>${fmtN(r4(m.required))}</b></td><td class="num"><b>${fmtN(r4(m.reserved))}</b></td><td class="num bad">${fmtN(r4(m.shortage))}</td><td colspan="2"></td></tr></tbody>`;
+}
+$("tS").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-code]"); if (!tr) return;
+  S.matSel = S.matSel === tr.dataset.code ? null : tr.dataset.code;
+  [...$("tS").querySelectorAll("tr[data-code]")].forEach(x => x.classList.toggle("on", x.dataset.code === S.matSel));
+  drawBrandwise();
+  if (S.matSel) $("brandS").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"nearest"});
+});
+document.querySelector("#short2 .seg").addEventListener("click", e => {
+  const b = e.target.closest(".segb"); if (!b) return;
+  shortType = b.dataset.t;
+  document.querySelectorAll("#short2 .segb").forEach(x => x.classList.toggle("on", x === b));
+  S.matSel = null; drawShort();
+});
+$("qS").addEventListener("input", drawShort);
+function pickCell(td){
+  const v = td.dataset.view;
+  $("view2").value = v;
+  S.rmpmFilter = td.dataset.rm ? [td.dataset.rm, td.dataset.pm] : null;
+  $("q2").value = "";
+  drawGrid2(); drawTable2();
+  $("cap2").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"});
+}
+$("grid2").addEventListener("click", e => { const td = e.target.closest("td[data-view]"); if (td) pickCell(td); });
+$("grid2").addEventListener("keydown", e => { const td = e.target.closest("td[data-view]"); if (td && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); pickCell(td); } });
+$("cap2").addEventListener("click", e => { if (e.target.id === "clr2"){ S.rmpmFilter = null; drawGrid2(); drawTable2(); } });
+$("view2").addEventListener("change", () => { drawGrid2(); drawTable2(); });
+$("q2").addEventListener("input", drawTable2);
+
+/* ---------- Excel output in the FINAMAN layout ---------- */
+const COLS_C = [11.71,11.14,13.29,170.29,13.43,36.57,11.71,10.43,9.14];
+const COLS_D = [16.29,15.71,17.86,170.29,18,36.57,16.29,14.86,15,111.71,9.14,19.71,18.14,18.29,19.57,15,9.14];
+function buildSheet(wb, name, src, rows, ncol, widths, label){
+  const ws = wb.addWorksheet(name);
+  widths.forEach((w,i) => ws.getColumn(i+1).width = w);
+  const L = String.fromCharCode(64+ncol);
+  const title = (src.title || `BATCH CLEARANCE ${name.toUpperCase()}`).replace(/BATCH CLEARANCE (CONCISE|DETAILS)/i, m => `${m} - ${label}`);
+  [[1, src.company || "BAJAJ FORMULATIONS"],[2, title],[3, null],[4, null]].forEach(([r,v]) => {
+    ws.mergeCells(`A${r}:${L}${r}`);
+    const c = ws.getCell(`A${r}`); c.value = v;
+    c.font = {name:"Ebrima", size:11, bold:true}; c.alignment = {horizontal:"center", vertical:"middle", wrapText:true};
+  });
+  ws.getRow(1).height = 16.5; ws.getRow(2).height = 16.5;
+  const border = {left:{style:"thin"}, top:{style:"thin"}, bottom:{style:"thin"}};
+  const hr = ws.getRow(5);
+  src.header.forEach((h,i) => { const c = hr.getCell(i+1); c.value = h; c.font = {name:"Arial", size:10, bold:true}; c.alignment = {horizontal:"center"}; c.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFC0C0C0"}}; c.border = border; });
+  rows.forEach((r, ri) => {
+    const row = ws.getRow(6+ri);
+    for (let i = 0; i < ncol; i++){
+      const c = row.getCell(i+1);
+      let v = r[i];
+      if (i === 1 && typeof v === "number"){ v = serialToDate(v); c.numFmt = "mm-dd-yy"; }
+      c.value = v ?? null; c.font = {name:"Arial", size:10}; c.border = border;
+    }
+  });
+  const last = 5 + rows.length;
+  ws.autoFilter = `A5:${L}${Math.max(last,5)}`;
+  const f = last + 2;
+  ws.mergeCells(`A${f}:${L}${f}`);
+  const fc = ws.getCell(`A${f}`); fc.value = src.footer || ""; fc.font = {name:"Calibri", size:10, bold:true};
+}
+async function makeWorkbook(src, conciseRows, label){
+  const wb = new ExcelJS.Workbook();
+  const keys = new Set(conciseRows.map(lineKey));
+  const detailRows = src.details ? src.details.data.filter(r => keys.has(lineKey(r))) : [];
+  if (src.details) buildSheet(wb, "Details", src.details, detailRows, 17, COLS_D, label);
+  buildSheet(wb, "Concise", src.concise, conciseRows, 9, COLS_C, label);
+  wb.views = [{activeTab: src.details ? 1 : 0}];
+  const buf = await wb.xlsx.writeBuffer();
+  return { blob: new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), detailCount: detailRows.length };
+}
+// Pending orders have no materials: one Concise sheet in the batch clearance layout, order details added after Clear (PM)
+async function makeOrdersWorkbook(lines, label){
+  const wb = new ExcelJS.Workbook();
+  const meta = { company: S.B.concise.company || S.P.concise.company, title: S.B.concise.title, footer: S.B.concise.footer,
+    header: [...S.B.concise.header, "Order No", "Party Name", "Product Type", "Pending Qty", "Status"] };
+  const rows = lines.map(({r, why}) => [...r.slice(0, 13), why]);
+  buildSheet(wb, "Concise", meta, rows, 14, [...COLS_C, 16, 40, 14, 12, 26], label);
+  const buf = await wb.xlsx.writeBuffer();
+  return { blob: new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), detailCount: 0 };
+}
+// Shortage workbooks use the same FINAMAN look: company + title rows, grey header, thin borders, footer
+function plainSheet(wb, name, title, header, rows, widths, totalRow){
+  const ws = wb.addWorksheet(name);
+  const n = header.length, L = String.fromCharCode(64 + n);
+  widths.forEach((w,i) => ws.getColumn(i+1).width = w);
+  [[1, S.B.concise.company || "BAJAJ FORMULATIONS"], [2, title], [3, null], [4, null]].forEach(([r,v]) => {
+    ws.mergeCells(`A${r}:${L}${r}`); const c = ws.getCell(`A${r}`); c.value = v;
+    c.font = {name:"Ebrima", size:11, bold:true}; c.alignment = {horizontal:"center", vertical:"middle", wrapText:true};
+  });
+  const border = {left:{style:"thin"}, top:{style:"thin"}, bottom:{style:"thin"}};
+  header.forEach((h,i) => { const c = ws.getRow(5).getCell(i+1); c.value = h; c.font = {name:"Arial", size:10, bold:true}; c.alignment = {horizontal:"center", wrapText:true}; c.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFC0C0C0"}}; c.border = border; });
+  const all = totalRow ? [...rows, totalRow] : rows;
+  all.forEach((r, ri) => {
+    const row = ws.getRow(6 + ri), tot = totalRow && ri === rows.length;
+    r.forEach((v, i) => {
+      const c = row.getCell(i+1);
+      if (v instanceof Date){ c.numFmt = "mm-dd-yy"; }
+      else if (typeof v === "number" && !Number.isInteger(v)) c.numFmt = "0.0000";
+      c.value = v ?? null; c.font = {name:"Arial", size:10, bold:!!tot}; c.border = border;
+    });
+  });
+  ws.autoFilter = `A5:${L}${5 + rows.length}`;
+  const f = 6 + all.length + 1;
+  ws.mergeCells(`A${f}:${L}${f}`); const fc = ws.getCell(`A${f}`); fc.value = S.B.concise.footer || ""; fc.font = {name:"Calibri", size:10, bold:true};
+}
+const reportStamp = () => (String(S.B.concise.title).match(/\(([^)]+)\)\s*$/) || [,""])[1];
+const listLabel = () => { const v = $("view2").value, f = S.rmpmFilter; return `${VIEW_NAME[v]}${f ? ` - RM ${f[0]} PM ${f[1]}` : ""}${shortType !== "all" ? ` - ${shortType} only` : ""}`.toUpperCase(); };
+const W_BRAND = [14,16,40,8,12,12,12,36,11,12,12,12,10,10];
+const H_BRAND = ["Item Code","Item Type","Item Name","Unit","Wrkord. No.","Wrkord. Dt.","Product Code","Product Name","Wrkord. Qty","Requried Qty.","Reserved Qty.","Stock Shortage","Clear (RM)","Clear (PM)"];
+const brandRow = (m, {r, d}) => [m.code, m.type, m.name, m.unit, r[0], serialToDate(r[1]), r[4], r[5], r[6], d[12], d[13], d[14], r[7], r[8]];
+async function shortageWorkbook(){
+  const wb = new ExcelJS.Workbook(), stamp = reportStamp(), lbl = listLabel();
+  const mats = S.mats;
+  plainSheet(wb, "Material Summary", `SHORTAGE SUMMARY - ${lbl}${stamp ? ` (${stamp})` : ""}`,
+    ["Item Code","Item Type","Item Name","Unit","Brands Short","Required (these brands)","Reserved","Stock in hand (all WOs)","Total Shortage"],
+    mats.map(m => [m.code, m.type, m.name, m.unit, m.lines.length, r4(m.required), r4(m.reserved), m.stock, r4(m.shortage)]),
+    [14,16,44,8,12,14,14,14,14]);
+  plainSheet(wb, "Brand-wise", `BRAND-WISE SHORTAGE - ${lbl}${stamp ? ` (${stamp})` : ""}`, H_BRAND,
+    mats.flatMap(m => m.lines.map(x => brandRow(m, x))), W_BRAND);
+  const buf = await wb.xlsx.writeBuffer();
+  return { blob: new Blob([buf]), detailCount: 0 };
+}
+async function materialWorkbook(m){
+  const wb = new ExcelJS.Workbook(), stamp = reportStamp();
+  plainSheet(wb, "Brand-wise", `${m.name.toUpperCase()} (${m.code}) - BRAND-WISE REQUIREMENT - ${listLabel()}${stamp ? ` (${stamp})` : ""}`, H_BRAND,
+    m.lines.map(x => brandRow(m, x)), W_BRAND,
+    ["Total", "", `Stock in hand: ${m.stock ?? ""}`, m.unit, "", null, "", `${m.lines.length} brand${m.lines.length === 1 ? "" : "s"}`, null, r4(m.required), r4(m.reserved), r4(m.shortage), "", ""]);
+  const buf = await wb.xlsx.writeBuffer();
+  return { blob: new Blob([buf]), detailCount: 0 };
+}
+let downloads = null;
+async function offer(btn, noteEl, filename, src, rows, label, builder){
+  if (!downloads && !STANDALONE){ noteEl.textContent = "Downloads aren't available in this view. Open the artifact in claude.ai to save files."; noteEl.className = "note bad"; return; }
+  btn.disabled = true; noteEl.innerHTML = `<span class="busy"></span>Building the Excel file…`; noteEl.className = "note";
+  try {
+    await tick();
+    const {blob, detailCount} = builder ? await builder() : await makeWorkbook(src, rows, label);
+    if (downloads) await downloads.save({filename, data: blob});
+    else { // hosted outside claude.ai: a normal browser download
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename;
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }
+    noteEl.textContent = label ? `Saved ${filename}: ${rows.length} lines${detailCount ? `, ${detailCount.toLocaleString("en-IN")} material rows` : ""}.` : `Saved ${filename}.`; noteEl.className = "note ok";
+  } catch (e){
+    const code = e && e.code;
+    noteEl.textContent = code === "declined" ? "Save cancelled." : code === "rate_limited" ? "Another save is waiting for you. Finish it, then try again." : `Couldn't save the file (${code || e?.message || "error"}).`;
+    noteEl.className = code === "declined" ? "note" : "note bad";
+  } finally { btn.disabled = false; }
+}
+const stamp = () => { const d = new Date(); return `${String(d.getDate()).padStart(2,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${d.getFullYear()}`; };
+$("dl1").onclick = () => offer($("dl1"), $("dl1note"), `Pending not in Batch Clearance ${stamp()}.xlsx`, S.P, S.step1.lines.map(x => x.r), "PENDING NOT IN BATCH CLEARANCE",
+  S.P.kind === "orders" ? () => makeOrdersWorkbook(S.step1.lines, "PENDING NOT IN BATCH CLEARANCE") : null);
+$("dl2").onclick = () => offer($("dl2"), $("dl2note"), `Batch Clearance - Remaining after Graphics ${stamp()}.xlsx`, S.B, S.step2.remaining.map(x => x.r), "REMAINING AFTER GRAPHICS");
+$("dl2s").onclick = () => {
+  const v = $("view2").value, f = S.rmpmFilter, list = currentList2();
+  const tag = `${VIEW_NAME[v]}${f ? ` RM ${f[0]} PM ${f[1]}` : ""}`;
+  offer($("dl2s"), $("dl2note"), `Batch Clearance - ${tag.replace(/[()]/g, "")} ${stamp()}.xlsx`, S.B, list.map(x => x.r), tag.toUpperCase().replace(/[()]/g, ""));
+};
+$("dlS").onclick = () => offer($("dlS"), $("dlSnote"), `Shortage Report - ${listLabel().replace(/[()]/g, "")} ${stamp()}.xlsx`, S.B, S.mats, "", shortageWorkbook);
+$("dlB").onclick = () => {
+  const m = S.mats.find(x => x.code === S.matSel); if (!m) return;
+  offer($("dlB"), $("dlSnote"), `${m.name.replace(/[\\/:*?"<>|]/g, "")} - Brand-wise Requirement ${stamp()}.xlsx`, S.B, m.lines, "", () => materialWorkbook(m));
+};
+$("dl2r").onclick = () => offer($("dl2r"), $("dl2note"), `Batch Clearance - Removed (in Graphics) ${stamp()}.xlsx`, S.B, S.step2.removed.map(x => x.r), "IN GRAPHICS");
+
+/* ---------- file inputs ---------- */
+function setDrop(id, state, name, meta){
+  const d = $(id); d.classList.remove("loaded","err"); if (state) d.classList.add(state);
+  d.querySelector(".fname").textContent = name; d.querySelector(".meta").textContent = meta;
+}
+async function handle(kind, file){
+  if (!file) return;
+  const id = {P:"dropP", B:"dropB", G:"dropG"}[kind];
+  setDrop(id, null, file.name, "Reading…");
+  await tick();
+  try {
+    if (kind === "G"){
+      S.G = await readGraphics(file);
+      setDrop(id, "loaded", file.name, `${S.G.items.length.toLocaleString("en-IN")} Graphics items · ${new Set(S.G.items.map(i => norm(i.brand))).size} brands`);
+      runStep2();
+    } else {
+      const bc = kind === "P" ? await readPendingOrBC(file) : await readBC(file);
+      S[kind] = bc;
+      setDrop(id, "loaded", file.name, bc.kind === "orders"
+        ? `${bc.concise.data.length.toLocaleString("en-IN")} pending orders`
+        : `${bc.concise.data.length.toLocaleString("en-IN")} lines · ${bc.details ? bc.details.data.length.toLocaleString("en-IN") + " material rows" : "no Details sheet"}`);
+      if (kind === "B"){
+        $("s2").classList.remove("locked"); $("fileG").disabled = false;
+        if (!S.G) setDrop("dropG", null, "Choose or drop file", "BF_GRAPHICS export with a BRAND column");
+        else runStep2();
+      }
+      runStep1();
+    }
+    unlockChat();
+  } catch (e){
+    console.error(e);
+    setDrop(id, "err", file.name, e.message || "Couldn't read this file.");
+  }
+}
+for (const [kind, inp, drop] of [["P","fileP","dropP"],["B","fileB","dropB"],["G","fileG","dropG"]]){
+  $(inp).addEventListener("change", e => { handle(kind, e.target.files[0]); e.target.value = ""; });
+  const d = $(drop);
+  d.addEventListener("dragover", e => { e.preventDefault(); d.classList.add("over"); });
+  d.addEventListener("dragleave", () => d.classList.remove("over"));
+  d.addEventListener("drop", e => { e.preventDefault(); d.classList.remove("over"); if (kind === "G" && !S.B) return; handle(kind, e.dataTransfer.files[0]); });
+}
+
+/* ---------- Step 3: questions ---------- */
+let sample = null, canTools = false, ctl = null;
+function unlockChat(){
+  if (!S.P && !S.B && !S.G) return;
+  $("s3").classList.remove("locked");
+  if (!sample){ $("askNote").textContent = "Questions need Claude, which isn't available in this view."; return; }
+  $("askBox").disabled = false; $("askBtn").disabled = false;
+  const e = $("chatEmpty"); if (e) e.textContent = "Ask a question below, or tap a suggestion.";
+}
+const C = r => r.length > 9 && r[9]
+  ? ({order:r[9], approval_date:fmtDate(r[1]), code:r[4], product:r[5], planned_qty:r[6], party:r[10], type:r[11], pending_qty:r[12]})
+  : ({wo:r[0], date:fmtDate(r[1]), code:r[4], product:r[5], qty:r[6], rm:r[7], pm:r[8]});
+function graphicsInfo(product){
+  if (!S.step2) return null;
+  const hit = S.step2.removed.find(x => x.r[5] === product); return hit ? hit.match : null;
+}
+function sourceRows(source){
+  switch (source){
+    case "pendency": return S.P?.concise.data || [];
+    case "step1_missing": return S.step1?.lines.map(x => x.r) || [];
+    case "remaining": return S.step2?.remaining.map(x => x.r) || [];
+    case "removed": return S.step2?.removed.map(x => x.r) || [];
+    default: return S.B?.concise.data || [];
+  }
+}
+function sourceFile(source){ return source === "pendency" || source === "step1_missing" ? S.P : S.B; }
+function cap(obj){ let s = JSON.stringify(obj); while (s.length > 30000 && obj.rows && obj.rows.length > 10){ obj.rows = obj.rows.slice(0, Math.floor(obj.rows.length*0.7)); obj.note = `Rows cut to ${obj.rows.length} to fit; narrow the search for more.`; s = JSON.stringify(obj); } return obj; }
+const SRC = {type:"string", enum:["batch_clearance","pendency","step1_missing","remaining","removed"], description:"batch_clearance = all lines of the uploaded Batch Clearance; pendency = all orders in the Total Pending file (order no, party, approval date, planned qty; no RM/PM status); step1_missing = pending orders with no matching batch clearance line (no work order yet, or a different qty); remaining = batch clearance lines left after removing Graphics brands; removed = lines removed because the brand is in Graphics."};
+const TOOLS = [
+  { name:"find_lines", description:"Find lines with optional filters. Batch clearance sources return {wo,date,code,product,qty,rm,pm,graphics_brand}; pending sources return {order,approval_date,code,product,planned_qty,party,type,pending_qty,status}. Returns total count and rows.",
+    inputSchema:{type:"object", properties:{source:SRC, product_contains:{type:"string"}, party_contains:{type:"string"}, wo:{type:"number"}, rm:{type:"string",enum:["Yes","No"]}, pm:{type:"string",enum:["Yes","No"]}, limit:{type:"number"}}, required:["source"]},
+    execute(i){ let rows = sourceRows(String(i.source));
+      if (i.product_contains){ const q = norm(i.product_contains); rows = rows.filter(r => norm(r[5]).includes(q)); }
+      if (i.party_contains){ const q = norm(i.party_contains); rows = rows.filter(r => norm(r[10]).includes(q)); }
+      if (S.P?.kind === "orders" && (i.source === "pendency" || i.source === "step1_missing")){
+        const why = new Map((S.step1?.lines || []).map(x => [x.r, x.why]));
+        const lim = Math.min(Number(i.limit) || 200, 400);
+        return cap({ total: rows.length, rows: rows.slice(0, lim).map(r => ({...C(r), status: why.get(r) || "Has a batch clearance line"})) });
+      }
+      if (i.wo) rows = rows.filter(r => r[0] === Number(i.wo));
+      if (i.rm) rows = rows.filter(r => r[7] === i.rm); if (i.pm) rows = rows.filter(r => r[8] === i.pm);
+      const lim = Math.min(Number(i.limit) || 200, 400);
+      return cap({ total: rows.length, rows: rows.slice(0, lim).map(r => ({...C(r), graphics_brand: graphicsInfo(r[5])})) }); } },
+  { name:"workorder_materials", description:"List the raw and packing materials of one work order line from the Details sheet: item code, type, name, unit, opening stock, required, reserved and shortage.",
+    inputSchema:{type:"object", properties:{source:{type:"string",enum:["batch_clearance","pendency"]}, wo:{type:"number"}, product_contains:{type:"string"}, only_short:{type:"boolean"}}, required:["source"]},
+    execute(i){ const f = sourceFile(String(i.source)); if (!f?.details) throw new Error("That file has no Details sheet.");
+      let rows = f.details.data;
+      if (i.wo) rows = rows.filter(r => r[0] === Number(i.wo));
+      if (i.product_contains){ const q = norm(i.product_contains); rows = rows.filter(r => norm(r[5]).includes(q)); }
+      if (!i.wo && !i.product_contains) throw new Error("Give a work order number or a product name.");
+      if (i.only_short) rows = rows.filter(r => (r[14] || 0) > 0);
+      return cap({ total: rows.length, rows: rows.slice(0, 250).map(r => ({wo:r[0], product:r[5], wo_qty:r[6], item_code:r[7], type:r[8], item:String(r[9]).trim(), unit:r[10], stock:r[11], required:r[12], reserved:r[13], shortage:r[14]})) }); } },
+  { name:"material_shortage", description:"Find work order lines that are short of a material (stock shortage > 0). Match by item name or item code. scope limits the lines to a step result. Returns rows with required and shortage per line, plus totals.",
+    inputSchema:{type:"object", properties:{item_contains:{type:"string"}, source:{type:"string",enum:["batch_clearance","pendency"]}, scope:{type:"string",enum:["all","remaining","removed","step1_missing"]}}, required:["item_contains"]},
+    execute(i){ const src = String(i.source || "batch_clearance"); const f = sourceFile(src); if (!f?.details) throw new Error("That file has no Details sheet.");
+      const q = norm(i.item_contains); let keys = null;
+      if (i.scope && i.scope !== "all") keys = new Set(sourceRows(String(i.scope)).map(lineKey));
+      const rows = f.details.data.filter(r => (r[14] || 0) > 0 && (norm(r[9]).includes(q) || norm(r[7]) === q) && (!keys || keys.has(lineKey(r))));
+      const lines = rows.map(r => ({wo:r[0], product:r[5], wo_qty:r[6], item:String(r[9]).trim(), unit:r[10], required:r[12], shortage:r[14], rm:r[15], pm:r[16]}));
+      return cap({ lines: lines.length, total_required: Math.round(lines.reduce((a,x)=>a+(x.required||0),0)*100)/100, rows: lines }); } },
+  { name:"top_shortages", description:"Rank materials by how many work order lines are short of them. Returns item, type, number of lines short and total shortage.",
+    inputSchema:{type:"object", properties:{type:{type:"string",enum:["Raw Material","Packing Material","any"]}, scope:{type:"string",enum:["all","remaining","removed"]}, limit:{type:"number"}}},
+    execute(i){ if (!S.B?.details) throw new Error("No Batch Clearance Details sheet loaded.");
+      let keys = null; if (i.scope && i.scope !== "all") keys = new Set(sourceRows(String(i.scope)).map(lineKey));
+      const m = new Map();
+      for (const r of S.B.details.data){ if (!((r[14]||0) > 0)) continue; if (i.type && i.type !== "any" && r[8] !== i.type) continue; if (keys && !keys.has(lineKey(r))) continue;
+        const k = r[7]; const e = m.get(k) || {item:String(r[9]).trim(), code:k, type:r[8], unit:r[10], lines:0, shortage:0}; e.lines++; e.shortage += r[14]; m.set(k, e); }
+      return { rows: [...m.values()].sort((a,b) => b.lines - a.lines).slice(0, Math.min(Number(i.limit)||15, 60)).map(e => ({...e, shortage: Math.round(e.shortage*100)/100})) }; } },
+  { name:"graphics_lookup", description:"Look up Graphics (BF_GRAPHICS) items whose BRAND text contains the search. Returns step, status, doer, planned date, type (NEW/REPEAT), qty and accepted date.",
+    inputSchema:{type:"object", properties:{brand_contains:{type:"string"}}, required:["brand_contains"]},
+    execute(i){ if (!S.G) throw new Error("No Graphics file uploaded yet."); const q = norm(i.brand_contains);
+      const rows = S.G.items.filter(it => norm(it.text).includes(q));
+      return cap({ total: rows.length, rows: rows.slice(0, 150).map(it => ({item:it.text, brand:it.brand, step:`${it.seq} ${it.step}`.trim(), status:it.status, doer:it.doer, planned:it.planned, type:it.type, qty:it.qty, accepted:it.accepted})) }); } },
+];
+function contextText(){
+  const L = [];
+  if (S.P) L.push(S.P.kind === "orders"
+    ? `Total Pending file "${S.P.name}": ${S.P.concise.data.length} pending customer orders (order no, party, approval date, planned qty in boxes; no work order numbers and no RM/PM status). Orders are matched to batch clearance lines by product code + quantity.`
+    : `Total Pendency file "${S.P.name}": ${S.P.concise.data.length} work order lines (report title: ${S.P.concise.title}).`);
+  if (S.B) L.push(`Batch Clearance file "${S.B.name}": ${S.B.concise.data.length} work order lines, ${S.B.details?.data.length || 0} material rows (report title: ${S.B.concise.title}).`);
+  if (S.step1){ const n = S.step1.lines.filter(x => x.why === "No work order").length;
+    L.push(`Step 1 result: ${S.step1.lines.length} pending lines are not in the batch clearance (${n} have no work order at all, ${S.step1.lines.length - n} have a work order at a different quantity).`); }
+  if (S.G) L.push(`Graphics file "${S.G.name}": ${S.G.items.length} items.`);
+  if (S.step2){ const c = (a,x,y) => a.filter(o => o.r[7]===x && o.r[8]===y).length; const R = S.step2.remaining, D = S.step2.removed;
+    L.push(`Step 2 result: ${D.length} batch clearance lines removed (brand in Graphics), ${R.length} remaining (${new Set(R.map(x=>x.r[5])).size} brands). RM/PM breakdown remaining|removed: Yes/Yes ${c(R,"Yes","Yes")}|${c(D,"Yes","Yes")}, Yes/No ${c(R,"Yes","No")}|${c(D,"Yes","No")}, No/Yes ${c(R,"No","Yes")}|${c(D,"No","Yes")}, No/No ${c(R,"No","No")}|${c(D,"No","No")}.`); }
+  return L.join("\n");
+}
+function compactData(){ // used only when this view cannot run page tools
+  const rows = (S.step2 ? [...S.step2.remaining.map(x => [...x.r, "remaining"]), ...S.step2.removed.map(x => [...x.r, "removed:"+x.match])] : (S.B?.concise.data || []).map(r => [...r, ""]));
+  let out = "WO|Date|Code|Product|Qty|RM|PM|Graphics\n" + rows.map(r => [r[0], fmtDate(r[1]), r[4], r[5], r[6], r[7], r[8], r[9]].join("|")).join("\n");
+  if (S.step1) out += "\n\nPending orders not in batch clearance (Order|Approval date|Code|Product|Planned qty|Party|Status):\n" + S.step1.lines.map(({r, why}) => [r[9] ?? r[0], fmtDate(r[1]), r[4], r[5], r[6], r[10] ?? "", why].join("|")).join("\n");
+  return out.slice(0, 200000);
+}
+const RULES = () => `You answer questions from a production planner at a pharma tablet manufacturer about their FINAMAN ERP exports.
+Terms: WO = work order. RM = raw material, PM = packing material. "Clear (RM) = Yes" means every raw material for that work order line is fully reserved; "No" means at least one is short. Stock Shortage > 0 on a Details row means that material is short for that line. A "line" is one work order + product + quantity. "Graphics" is the artwork/packaging design tracker; brands found there were removed in step 2.
+${canTools ? "Always use the tools to look up exact data before answering. Never guess numbers or brand names. If a search finds nothing, try a shorter or alternate spelling once, then say it isn't in the files." : "Use only the data below. Never guess numbers or brand names."}
+Answer directly and briefly. For lists of brands or lines use a markdown table with columns that matter (WO, product, qty, RM, PM and anything asked). Give counts. Use dd-mm-yyyy dates.
+
+Loaded files:
+${contextText()}${canTools ? "" : "\n\nData (pipe-separated):\n" + compactData()}`;
+
+function mdToHtml(md){
+  const lines = esc(md).split("\n"); let html = "", i = 0;
+  const inline = s => s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  while (i < lines.length){
+    const l = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(l) && i+1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i+1])){
+      const cells = s => s.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+      const head = cells(l); i += 2; const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      const isNum = c => /^-?[\d,.]+$/.test(c);
+      html += `<div class="tablebox" style="max-height:none"><table><thead><tr>${head.map(h => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td class="${isNum(c)?"num":""}">${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(l)){ html += "<ul>"; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) html += `<li>${inline(lines[i++].replace(/^\s*[-*]\s+/, ""))}</li>`; html += "</ul>"; continue; }
+    if (/^\s*\d+\.\s+/.test(l)){ html += "<ol>"; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) html += `<li>${inline(lines[i++].replace(/^\s*\d+\.\s+/, ""))}</li>`; html += "</ol>"; continue; }
+    if (/^#{1,4}\s+/.test(l)){ html += `<p><b>${inline(l.replace(/^#+\s+/, ""))}</b></p>`; i++; continue; }
+    if (l.trim()) html += `<p>${inline(l)}</p>`;
+    i++;
+  }
+  return html;
+}
+function addMsg(cls, html){ const e = $("chatEmpty"); if (e) e.remove(); const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; $("msgs").append(d); $("msgs").scrollTop = $("msgs").scrollHeight; return d; }
+async function ask(q){
+  q = q.trim(); if (!q || !sample || ctl) return;
+  addMsg("user", esc(q));
+  const bot = addMsg("bot", `<span class="busy"></span>Thinking…`);
+  const status = document.createElement("div"); status.className = "tool";
+  $("askBox").value = ""; $("askBtn").disabled = true; $("stopBtn").hidden = false;
+  S.turns.push({role:"user", content:q});
+  const turns = [{role:"user", content:RULES()}, ...S.turns.slice(-8)];
+  ctl = new AbortController();
+  const tools = canTools ? TOOLS.map(t => ({...t, execute: (inp) => { status.textContent = `Looking up: ${t.name.replace(/_/g," ")}…`; if (!bot.contains(status)) bot.append(status); return t.execute(inp); }})) : undefined;
+  try {
+    const opts = { signal: ctl.signal, onText: ({text}) => { bot.innerHTML = mdToHtml(text); $("msgs").scrollTop = $("msgs").scrollHeight; } };
+    if (tools) opts.tools = tools; else opts.cache = false;
+    const res = await sample(turns, opts);
+    bot.innerHTML = mdToHtml(res.text) + (res.truncated ? `<p class="note">The answer was cut short. Ask for less at a time.</p>` : "");
+    S.turns.push({role:"assistant", content:res.text});
+  } catch (e){
+    S.turns.pop();
+    const keep = e && e.text ? mdToHtml(e.text) : "";
+    const msg = { cancelled:"Stopped.", not_granted:"Claude wasn't allowed for this page, so questions are off for this visit.", sampling_disabled:"Claude isn't available for this account.", rate_limited:"Too many questions at once. Wait a moment, then ask again.", prompt_too_large:"That needs too much data at once. Ask about fewer brands.", refused:"Claude couldn't answer that. Try rephrasing.", session_expired:"Sign in again to keep asking." }[e?.code] || "Something went wrong reaching Claude. Ask again.";
+    bot.innerHTML = keep + `<p class="note${e?.code==="cancelled"?"":" bad"}">${msg}</p>`;
+    if (["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].includes(e?.code)){ $("askBox").disabled = true; }
+  } finally {
+    ctl = null; $("stopBtn").hidden = true; $("askBtn").disabled = $("askBox").disabled;
+  }
+}
+$("askBtn").onclick = () => ask($("askBox").value);
+$("stopBtn").onclick = () => ctl?.abort();
+$("askBox").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ask($("askBox").value); } });
+$("chips").addEventListener("click", e => { const b = e.target.closest("button[data-q]"); if (b && !$("askBox").disabled) ask(b.dataset.q); });
+
+/* ---------- capabilities ---------- */
+(async () => {
+  if (!window.claude?.use) return;
+  claude.use("downloads").then(d => { downloads = d; }).catch(() => {});
+  try {
+    sample = await claude.use("sample");
+    if (sample){ const lim = await sample.limits().catch(() => null); canTools = !!lim?.tools; }
+  } catch { sample = null; }
+  unlockChat();
+})();
+</script>
+
+</body>
+
+</html>
