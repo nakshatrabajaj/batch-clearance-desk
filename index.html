@@ -761,11 +761,6 @@ async function pmCollatedWorkbook(){
     g.both.map((l,i) => [...lineHead(i, l.r, l.r[7]), stackCode(l.f), stackName(l.f), stackQty(l.f), stackCode(l.c), stackName(l.c), stackQty(l.c), l.otherTxt]), [...W,12,42,14,12,42,14,30]);
   if (g.other.length) collatedSheet(wb, "Other PM Short", `OTHER PM SHORT (no carton or foil short) — ${base}`, note(g.other.length), [...H,"PM Item Code","PM Item Name","PM Shortage Qty"],
     g.other.map((l,i) => [...lineHead(i, l.r, l.r[7]), stackCode(l.o), stackName(l.o), stackQty(l.o)]), [...W,12,42,14]);
-  collatedSheet(wb, "PM Total by Material", `PM SHORTAGE TOTAL BY MATERIAL — ${base}`, `Materials: ${new Set(short.flatMap(l => l.items.map(d => d[7]))).size}   |   one row per item, summed over the brands above`,
-    ["Sr. No.","Item Code","Item Name","Unit","Category","Brands Short","Required (these brands)","Stock in hand (all WOs)","Total Shortage"],
-    materialTotals(short, pmKind, {carton:"Carton", foil:"Foil", other:"Other PM"}), [7,12,48,8,11,11,14,14,14]);
-  if (clear.length) collatedSheet(wb, "PM No - nothing short", `PM CLEAR = NO BUT NO PACKING LINE SHORT — ${base}`, `Brands: ${clear.length}   |   check these in FINAMAN: no Details row shows a PM stock shortage`, [...H.slice(0,6), "RM Cleared"],
-    clear.map((l,i) => lineHead(i, l.r, l.r[7])), W);
   const buf = await wb.xlsx.writeBuffer();
   return { blob:new Blob([buf]), detailCount:0, summary:`Carton ${g.carton.length} · Foil ${g.foil.length} · Both ${g.both.length}${g.other.length ? ` · Other PM ${g.other.length}` : ""}${clear.length ? ` · ${clear.length} PM No with nothing short` : ""}` };
 }
@@ -787,11 +782,6 @@ async function rmCollatedWorkbook(){
     g.exc.map((l,i) => [...lineHead(i, l.r, l.r[8]), stackCode(l.e), stackName(l.e), stackQty(l.e)]), [...W,12,42,14]);
   collatedSheet(wb, "Both Short", `API + EXCIPIENT SHORT — ${base}`, note(g.both.length), [...H,"API Item Code","API Item Name","API Shortage Qty","Excipient Item Code","Excipient Item Name","Excipient Shortage Qty"],
     g.both.map((l,i) => [...lineHead(i, l.r, l.r[8]), stackCode(l.a), stackName(l.a), stackQty(l.a), stackCode(l.e), stackName(l.e), stackQty(l.e)]), [...W,12,42,14,12,42,14]);
-  collatedSheet(wb, "RM Total by Material", `RM SHORTAGE TOTAL BY MATERIAL — ${base}`, `Materials: ${new Set(short.flatMap(l => l.items.map(d => d[7]))).size}   |   one row per item, summed over the brands above`,
-    ["Sr. No.","Item Code","Item Name","Unit","Category","Brands Short","Required (these brands)","Stock in hand (all WOs)","Total Shortage"],
-    materialTotals(short, rmKind, {api:"API", exc:"Excipient"}), [7,12,48,8,11,11,14,14,14]);
-  if (clear.length) collatedSheet(wb, "RM No - nothing short", `RM CLEAR = NO BUT NO RAW MATERIAL LINE SHORT — ${base}`, `Brands: ${clear.length}   |   check these in FINAMAN: no Details row shows an RM stock shortage`, [...H.slice(0,6), "PM Cleared"],
-    clear.map((l,i) => lineHead(i, l.r, l.r[8])), W);
   const buf = await wb.xlsx.writeBuffer();
   return { blob:new Blob([buf]), detailCount:0, summary:`API ${g.api.length} · Excipient ${g.exc.length} · Both ${g.both.length}${clear.length ? ` · ${clear.length} RM No with nothing short` : ""}` };
 }
