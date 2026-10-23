@@ -765,25 +765,17 @@ async function pmCollatedWorkbook(){
   return { blob:new Blob([buf]), detailCount:0, summary:`Carton ${g.carton.length} · Foil ${g.foil.length} · Both ${g.both.length}${g.other.length ? ` · Other PM ${g.other.length}` : ""}${clear.length ? ` · ${clear.length} PM No with nothing short` : ""}` };
 }
 async function rmCollatedWorkbook(){
-  const {scope, short, clear} = collatedLines("RM");
-  const g = {api:[], exc:[], both:[]};
-  for (const l of short){
-    l.a = l.items.filter(d => rmKind(d) === "api"); l.e = l.items.filter(d => rmKind(d) === "exc");
-    (l.a.length && l.e.length ? g.both : l.a.length ? g.api : g.exc).push(l);
-  }
+  // RM file = one sheet: every short raw material once, summed over the RM-not-clear brands
+  const {scope, short} = collatedLines("RM");
   const date = bcDate(), base = `collated from Batch Clearance (RM No PM Yes + RM No PM No)${date ? ` dated ${date}` : ""} · ${SCOPE_TXT[scope]}`;
-  const note = n => `Brands: ${n}   |   Shortage = "Stock Shortage" > 0 on Raw Material lines in the Details sheets   |   API = ACT/ items, Excipient = all other RM`;
   const wb = new ExcelJS.Workbook();
-  const H = ["Sr. No.","Wrkord. No.","Wrkord. Dt.","Product Code","Brand (Product Name)","Wrkord. Qty","PM Cleared"];
-  const W = [7,11,12,12,30,11,10];
-  collatedSheet(wb, "API Short", `API SHORT — ${base}`, note(g.api.length), [...H,"API Item Code","API Item Name","API Shortage Qty"],
-    g.api.map((l,i) => [...lineHead(i, l.r, l.r[8]), stackCode(l.a), stackName(l.a), stackQty(l.a)]), [...W,12,42,14]);
-  collatedSheet(wb, "Excipient Short", `EXCIPIENT SHORT — ${base}`, note(g.exc.length), [...H,"Excipient Item Code","Excipient Item Name","Excipient Shortage Qty"],
-    g.exc.map((l,i) => [...lineHead(i, l.r, l.r[8]), stackCode(l.e), stackName(l.e), stackQty(l.e)]), [...W,12,42,14]);
-  collatedSheet(wb, "Both Short", `API + EXCIPIENT SHORT — ${base}`, note(g.both.length), [...H,"API Item Code","API Item Name","API Shortage Qty","Excipient Item Code","Excipient Item Name","Excipient Shortage Qty"],
-    g.both.map((l,i) => [...lineHead(i, l.r, l.r[8]), stackCode(l.a), stackName(l.a), stackQty(l.a), stackCode(l.e), stackName(l.e), stackQty(l.e)]), [...W,12,42,14,12,42,14]);
+  const rows = materialTotals(short, rmKind, {api:"API", exc:"Excipient"});
+  collatedSheet(wb, "RM Total by Material", `RM SHORTAGE TOTAL BY MATERIAL — ${base}`,
+    `Materials: ${rows.length}   |   Brands short: ${short.length}   |   Shortage = "Stock Shortage" > 0 on Raw Material lines in the Details sheets   |   API = ACT/ items, Excipient = all other RM`,
+    ["Sr. No.","Item Code","Item Name","Unit","Category","Brands Short","Required (these brands)","Stock in hand (all WOs)","Total Shortage"],
+    rows, [7,12,48,8,11,11,14,14,14]);
   const buf = await wb.xlsx.writeBuffer();
-  return { blob:new Blob([buf]), detailCount:0, summary:`API ${g.api.length} · Excipient ${g.exc.length} · Both ${g.both.length}${clear.length ? ` · ${clear.length} RM No with nothing short` : ""}` };
+  return { blob:new Blob([buf]), detailCount:0, summary:`${rows.length} raw materials short across ${short.length} brands` };
 }
 let downloads = null;
 async function offer(btn, noteEl, filename, src, rows, label, builder){
