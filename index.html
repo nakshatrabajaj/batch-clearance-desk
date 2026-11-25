@@ -143,7 +143,7 @@ td.bad{color:var(--bad);font-weight:600}
   <section class="station" id="s1">
     <div class="st-head">
       <span class="st-no">STEP 1</span><h2>Pendency vs batch clearance</h2>
-      <p>Upload the Total Pending report and the Batch Clearance export. Each pending order is matched to a batch clearance line by product code and quantity. You get every order that has no match, in the batch clearance format, ready for creating work orders.</p>
+      <p>Upload the Total Pending report and the Batch Clearance export. Each pending order is matched to a batch clearance line by product code and quantity. You get the month-wise count of pending orders and every order that has no match, in the batch clearance format, ready for creating work orders.</p>
     </div>
     <div class="st-body">
       <div class="drops">
@@ -152,11 +152,14 @@ td.bad{color:var(--bad);font-weight:600}
       </div>
       <div id="r1" hidden>
         <div class="stats" id="stats1"></div>
-        <div class="row" style="margin-top:12px">
-          <button id="dl1">Download Excel</button>
-          <span class="note" id="dl1note"></span>
+        <div style="margin-top:14px;overflow-x:auto"><table class="grid-rmpm" id="grid1"></table></div>
+        <p class="note" style="margin:6px 0 0">Month-wise count of pending orders. Click any number to see its list below.</p>
+        <div class="row listhead" style="margin-top:12px">
+          <span id="cap1" class="cap"></span>
+          <button id="dl1">Download this list</button>
         </div>
-        <div class="tablebox" style="margin-top:12px"><table id="t1"></table></div>
+        <span class="note" id="dl1note"></span>
+        <div class="tablebox" style="margin-top:8px"><table id="t1"></table></div>
       </div>
     </div>
   </section>
@@ -378,7 +381,8 @@ function brandOf(s){
 function runStep1(){
   if (!S.P || !S.B) return;
   const orders = S.P.kind === "orders";
-  let tagged;
+  const IN = "In batch clearance";
+  let all;
   if (orders){
     // match each pending order to one batch clearance line with the same product code and quantity
     const pool = new Map(), codeQty = new Map();
@@ -386,35 +390,70 @@ function runStep1(){
       const k = `${String(r[4]).trim()}|${r[6]}`; pool.set(k, (pool.get(k) || 0) + 1);
       const c = String(r[4]).trim(); (codeQty.get(c) || codeQty.set(c, []).get(c)).push(r[6]);
     }
-    tagged = [];
+    all = [];
     for (const r of S.P.concise.data){
       const k = `${r[4]}|${r[6]}`;
-      if (pool.get(k) > 0){ pool.set(k, pool.get(k) - 1); continue; }
+      if (pool.get(k) > 0){ pool.set(k, pool.get(k) - 1); all.push({ r, why: IN, inBC: true }); continue; }
       const q = codeQty.get(r[4]);
-      tagged.push({ r, why: q ? `Qty differs (BC: ${q.join(", ")})` : "No work order" });
+      all.push({ r, why: q ? `Qty differs (BC: ${q.join(", ")})` : "No work order", inBC: false });
     }
   } else {
     const bKeys = new Set(S.B.concise.data.map(lineKey));
     const bWO = new Set(S.B.concise.data.map(r => r[0]));
-    tagged = S.P.concise.data.filter(r => !bKeys.has(lineKey(r))).map(r => ({ r, why: bWO.has(r[0]) ? "Qty differs" : "No work order" }));
+    all = S.P.concise.data.map(r => bKeys.has(lineKey(r)) ? { r, why: IN, inBC: true } : { r, why: bWO.has(r[0]) ? "Qty differs" : "No work order", inBC: false });
   }
-  S.step1 = { lines: tagged };
+  for (const x of all){ // month of the approval / work order date
+    const d = serialToDate(x.r[1]);
+    x.month = (d instanceof Date && !isNaN(d)) ? `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}` : "none";
+  }
+  const tagged = all.filter(x => !x.inBC);
+  S.step1 = { all, lines: tagged, sel: { month: null, col: "out" } };
   $("r1").hidden = false;
   const noWO = tagged.filter(t => t.why === "No work order").length;
   $("stats1").innerHTML =
-    stat(S.P.concise.data.length, orders ? "Pending orders" : "Pendency lines") + stat(S.B.concise.data.length, "Batch clearance lines") +
+    stat(all.length, orders ? "Pending orders" : "Pendency lines") + stat(S.B.concise.data.length, "Batch clearance lines") +
     stat(tagged.length, "Pending, not in BC", true) + stat(noWO, "No work order yet") + stat(tagged.length - noWO, "Work order at a different qty");
-  const t = $("t1");
-  if (!tagged.length){ t.innerHTML = `<tr><td class="empty">Every pending order is in the batch clearance.</td></tr>`; $("dl1").disabled = true; return; }
-  $("dl1").disabled = false;
-  const pill = why => `<span class="pill ${why==="No work order"?"warn":"neutral"}">${esc(why)}</span>`;
-  t.innerHTML = orders
-    ? `<thead><tr><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th><th>Status</th></tr></thead><tbody>` +
-      tagged.map(({r,why}) => `<tr><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td><td>${pill(why)}</td></tr>`).join("") + `</tbody>`
-    : `<thead><tr><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Status</th></tr></thead><tbody>` +
-      tagged.map(({r,why}) => `<tr><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td>${pill(why)}</td></tr>`).join("") + `</tbody>`;
+  drawGrid1(); drawTable1();
   $("f1").classList.add("done");
 }
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const monthName = k => k === "none" ? "No date" : `${MONTHS[Number(k.slice(5)) - 1]} ${k.slice(0,4)}`;
+const COL1 = { total:"All pending", in:"In batch clearance", out:"Not in batch clearance" };
+function list1(sel = S.step1.sel){
+  return S.step1.all.filter(x => (!sel.month || x.month === sel.month) && (sel.col === "total" || (sel.col === "in") === x.inBC));
+}
+function drawGrid1(){
+  const { all, sel } = S.step1;
+  const months = [...new Set(all.map(x => x.month))].sort((a,b) => (a === "none") - (b === "none") || a.localeCompare(b));
+  const cell = (month, col, bold) => {
+    const n = list1({month, col}).length, on = sel.month === month && sel.col === col;
+    return `<td class="num click${on?" on":""}" data-month="${month || ""}" data-col="${col}" tabindex="0" role="button" aria-label="Show ${n} orders">${bold?`<b>${n}</b>`:n}</td>`;
+  };
+  $("grid1").innerHTML = `<thead><tr><th>${S.P.kind === "orders" ? "Approval month" : "Work order month"}</th><th class="num">Pending orders</th><th class="num">In batch clearance</th><th class="num">Not in batch clearance</th></tr></thead><tbody>` +
+    months.map(m => `<tr><td>${monthName(m)}</td>${cell(m,"total")}${cell(m,"in")}${cell(m,"out")}</tr>`).join("") +
+    `<tr><td><b>Total</b></td>${cell(null,"total",true)}${cell(null,"in",true)}${cell(null,"out",true)}</tr></tbody>`;
+}
+const label1 = () => `${S.step1.sel.month ? monthName(S.step1.sel.month) : "All months"} - ${COL1[S.step1.sel.col]}`;
+function drawTable1(){
+  const orders = S.P.kind === "orders", list = list1(), t = $("t1");
+  $("cap1").innerHTML = `<b>${list.length.toLocaleString("en-IN")} ${orders ? "orders" : "lines"}</b> · ${esc(label1().replace(" - ", " · "))}`;
+  $("dl1").disabled = !list.length;
+  if (!list.length){ t.innerHTML = `<tr><td class="empty">No orders in this selection.</td></tr>`; return; }
+  const pill = x => `<span class="pill ${x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
+  const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="9" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
+  t.innerHTML = orders
+    ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th><th>Status</th></tr></thead><tbody>` +
+      shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td><td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`
+    : `<thead><tr><th class="num">#</th><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Status</th></tr></thead><tbody>` +
+      shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`;
+}
+function pickCell1(td){
+  S.step1.sel = { month: td.dataset.month || null, col: td.dataset.col };
+  drawGrid1(); drawTable1();
+  $("cap1").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"});
+}
+$("grid1").addEventListener("click", e => { const td = e.target.closest("td[data-col]"); if (td) pickCell1(td); });
+$("grid1").addEventListener("keydown", e => { const td = e.target.closest("td[data-col]"); if (td && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); pickCell1(td); } });
 const stat = (n, label, hi) => `<div class="stat${hi?" hi":""}"><b>${Number(n).toLocaleString("en-IN")}</b><span>${esc(label)}</span></div>`;
 const yn = v => v === "Yes" ? `<span class="pill yes">Yes</span>` : v === "No" ? `<span class="pill no">No</span>` : esc(v);
 
@@ -797,8 +836,9 @@ async function offer(btn, noteEl, filename, src, rows, label, builder){
   } finally { btn.disabled = false; }
 }
 const stamp = () => { const d = new Date(); return `${String(d.getDate()).padStart(2,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${d.getFullYear()}`; };
-$("dl1").onclick = () => offer($("dl1"), $("dl1note"), `Pending not in Batch Clearance ${stamp()}.xlsx`, S.P, S.step1.lines.map(x => x.r), "PENDING NOT IN BATCH CLEARANCE",
-  S.P.kind === "orders" ? () => makeOrdersWorkbook(S.step1.lines, "PENDING NOT IN BATCH CLEARANCE") : null);
+$("dl1").onclick = () => { const list = list1(), lbl = label1();
+  offer($("dl1"), $("dl1note"), `Pending - ${lbl} ${stamp()}.xlsx`, S.P, list.map(x => x.r), `PENDING - ${lbl.toUpperCase()}`,
+    S.P.kind === "orders" ? () => makeOrdersWorkbook(list, `PENDING - ${lbl.toUpperCase()}`) : null); };
 $("dl2").onclick = () => offer($("dl2"), $("dl2note"), `Batch Clearance - Remaining after Graphics ${stamp()}.xlsx`, S.B, S.step2.remaining.map(x => x.r), "REMAINING AFTER GRAPHICS");
 $("dl2s").onclick = () => {
   const v = $("view2").value, f = S.rmpmFilter, list = currentList2();
