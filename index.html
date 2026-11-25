@@ -153,7 +153,7 @@ td.bad{color:var(--bad);font-weight:600}
       <div id="r1" hidden>
         <div class="stats" id="stats1"></div>
         <div style="margin-top:14px;overflow-x:auto"><table class="grid-rmpm" id="grid1"></table></div>
-        <p class="note" style="margin:6px 0 0">Month-wise count of pending orders. Click any number to see its list below.</p>
+        <p class="note" style="margin:6px 0 0">Month-wise count of pending orders that are not in the batch clearance, and of those in it with PM clear = No. Click any number to see its list below.</p>
         <div class="row listhead" style="margin-top:12px">
           <span id="cap1" class="cap"></span>
           <button id="dl1">Download this list</button>
@@ -387,22 +387,24 @@ function runStep1(){
     // match each pending order to one batch clearance line with the same product code and quantity
     const pool = new Map(), codeQty = new Map();
     for (const r of S.B.concise.data){
-      const k = `${String(r[4]).trim()}|${r[6]}`; pool.set(k, (pool.get(k) || 0) + 1);
+      const k = `${String(r[4]).trim()}|${r[6]}`; (pool.get(k) || pool.set(k, []).get(k)).push(r);
       const c = String(r[4]).trim(); (codeQty.get(c) || codeQty.set(c, []).get(c)).push(r[6]);
     }
     all = [];
     for (const r of S.P.concise.data){
       const k = `${r[4]}|${r[6]}`;
-      if (pool.get(k) > 0){ pool.set(k, pool.get(k) - 1); all.push({ r, why: IN, inBC: true }); continue; }
+      if (pool.get(k)?.length){ all.push({ r, why: IN, inBC: true, bc: pool.get(k).shift() }); continue; }
       const q = codeQty.get(r[4]);
       all.push({ r, why: q ? `Qty differs (BC: ${q.join(", ")})` : "No work order", inBC: false });
     }
   } else {
-    const bKeys = new Set(S.B.concise.data.map(lineKey));
+    const bKeys = new Map(S.B.concise.data.map(r => [lineKey(r), r]));
     const bWO = new Set(S.B.concise.data.map(r => r[0]));
-    all = S.P.concise.data.map(r => bKeys.has(lineKey(r)) ? { r, why: IN, inBC: true } : { r, why: bWO.has(r[0]) ? "Qty differs" : "No work order", inBC: false });
+    all = S.P.concise.data.map(r => bKeys.has(lineKey(r)) ? { r, why: IN, inBC: true, bc: bKeys.get(lineKey(r)) } : { r, why: bWO.has(r[0]) ? "Qty differs" : "No work order", inBC: false });
   }
   for (const x of all){ // month of the approval / work order date
+    x.pmNo = !!x.bc && x.bc[8] === "No";
+    if (x.pmNo) x.why = "PM not clear";
     const d = serialToDate(x.r[1]);
     x.month = (d instanceof Date && !isNaN(d)) ? `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}` : "none";
   }
@@ -412,15 +414,16 @@ function runStep1(){
   const noWO = tagged.filter(t => t.why === "No work order").length;
   $("stats1").innerHTML =
     stat(all.length, orders ? "Pending orders" : "Pendency lines") + stat(S.B.concise.data.length, "Batch clearance lines") +
-    stat(tagged.length, "Pending, not in BC", true) + stat(noWO, "No work order yet") + stat(tagged.length - noWO, "Work order at a different qty");
+    stat(tagged.length, "Pending, not in BC", true) + stat(noWO, "No work order yet") + stat(tagged.length - noWO, "Work order at a different qty") +
+    stat(all.filter(x => x.pmNo).length, "In BC, PM not clear");
   drawGrid1(); drawTable1();
   $("f1").classList.add("done");
 }
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const monthName = k => k === "none" ? "No date" : `${MONTHS[Number(k.slice(5)) - 1]} ${k.slice(0,4)}`;
-const COL1 = { total:"All pending", in:"In batch clearance", out:"Not in batch clearance" };
+const COL1 = { out:"Not in batch clearance", pm:"PM not clear" };
 function list1(sel = S.step1.sel){
-  return S.step1.all.filter(x => (!sel.month || x.month === sel.month) && (sel.col === "total" || (sel.col === "in") === x.inBC));
+  return S.step1.all.filter(x => (!sel.month || x.month === sel.month) && (sel.col === "pm" ? x.pmNo : !x.inBC));
 }
 function drawGrid1(){
   const { all, sel } = S.step1;
@@ -429,9 +432,9 @@ function drawGrid1(){
     const n = list1({month, col}).length, on = sel.month === month && sel.col === col;
     return `<td class="num click${on?" on":""}" data-month="${month || ""}" data-col="${col}" tabindex="0" role="button" aria-label="Show ${n} orders">${bold?`<b>${n}</b>`:n}</td>`;
   };
-  $("grid1").innerHTML = `<thead><tr><th>${S.P.kind === "orders" ? "Approval month" : "Work order month"}</th><th class="num">Pending orders</th><th class="num">In batch clearance</th><th class="num">Not in batch clearance</th></tr></thead><tbody>` +
-    months.map(m => `<tr><td>${monthName(m)}</td>${cell(m,"total")}${cell(m,"in")}${cell(m,"out")}</tr>`).join("") +
-    `<tr><td><b>Total</b></td>${cell(null,"total",true)}${cell(null,"in",true)}${cell(null,"out",true)}</tr></tbody>`;
+  $("grid1").innerHTML = `<thead><tr><th>${S.P.kind === "orders" ? "Approval month" : "Work order month"}</th><th class="num">Not in batch clearance</th><th class="num">In batch clearance, PM not clear</th></tr></thead><tbody>` +
+    months.map(m => `<tr><td>${monthName(m)}</td>${cell(m,"out")}${cell(m,"pm")}</tr>`).join("") +
+    `<tr><td><b>Total</b></td>${cell(null,"out",true)}${cell(null,"pm",true)}</tr></tbody>`;
 }
 const label1 = () => `${S.step1.sel.month ? monthName(S.step1.sel.month) : "All months"} - ${COL1[S.step1.sel.col]}`;
 function drawTable1(){
@@ -439,11 +442,12 @@ function drawTable1(){
   $("cap1").innerHTML = `<b>${list.length.toLocaleString("en-IN")} ${orders ? "orders" : "lines"}</b> · ${esc(label1().replace(" - ", " · "))}`;
   $("dl1").disabled = !list.length;
   if (!list.length){ t.innerHTML = `<tr><td class="empty">No orders in this selection.</td></tr>`; return; }
-  const pill = x => `<span class="pill ${x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
-  const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="9" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
+  const pill = x => `<span class="pill ${x.pmNo ? "no" : x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
+  const pm = S.step1.sel.col === "pm";
+  const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="12" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
   t.innerHTML = orders
-    ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th><th>Status</th></tr></thead><tbody>` +
-      shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td><td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`
+    ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th>${pm ? `<th class="num">Wrkord. No.</th><th>Clear (RM)</th><th>Clear (PM)</th>` : ""}<th>Status</th></tr></thead><tbody>` +
+      shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td>${pm ? `<td class="num">${x.bc[0]}</td><td>${yn(x.bc[7])}</td><td>${yn(x.bc[8])}</td>` : ""}<td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`
     : `<thead><tr><th class="num">#</th><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Status</th></tr></thead><tbody>` +
       shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`;
 }
@@ -676,7 +680,7 @@ async function makeOrdersWorkbook(lines, label){
   const wb = new ExcelJS.Workbook();
   const meta = { company: S.B.concise.company || S.P.concise.company, title: S.B.concise.title, footer: S.B.concise.footer,
     header: [...S.B.concise.header, "Order No", "Party Name", "Product Type", "Pending Qty", "Status"] };
-  const rows = lines.map(({r, why}) => [...r.slice(0, 13), why]);
+  const rows = lines.map(({r, why, bc}) => { const o = [...r.slice(0, 13), why]; if (bc){ o[0] = bc[0]; o[7] = bc[7]; o[8] = bc[8]; } return o; });
   buildSheet(wb, "Concise", meta, rows, 14, [...COLS_C, 16, 40, 14, 12, 26], label);
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), detailCount: 0 };
