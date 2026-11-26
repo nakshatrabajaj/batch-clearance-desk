@@ -89,9 +89,9 @@ td.prod{font-weight:600;white-space:normal;min-width:160px}
 .cap{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .cap b{color:var(--ink)}
 button.mini{font-size:12px;padding:2px 8px}
-#t2 tbody tr.line{cursor:pointer}
-#t2 tbody tr.line:hover td{background:var(--soft)}
-#t2 tbody tr.line.open td{background:var(--accent-soft)}
+#t1 tbody tr.line,#t2 tbody tr.line{cursor:pointer}
+#t1 tbody tr.line:hover td,#t2 tbody tr.line:hover td{background:var(--soft)}
+#t1 tbody tr.line.open td,#t2 tbody tr.line.open td{background:var(--accent-soft)}
 td.shorts{white-space:normal;min-width:220px;font-size:12.5px}
 .tag{display:inline-block;font-size:11px;font-weight:600;border-radius:4px;padding:0 5px;margin-right:4px}
 .tag.rm{background:var(--bad-soft);color:var(--bad)} .tag.pm{background:var(--warn-soft);color:var(--warn)}
@@ -160,6 +160,7 @@ td.bad{color:var(--bad);font-weight:600}
         </div>
         <span class="note" id="dl1note"></span>
         <div class="tablebox" style="margin-top:8px"><table id="t1"></table></div>
+        <p class="note" id="hint1" style="margin:6px 0 0" hidden>Click an order to see every RM and PM item that is short for it.</p>
       </div>
     </div>
   </section>
@@ -445,10 +446,12 @@ function drawTable1(){
   if (!list.length){ t.innerHTML = `<tr><td class="empty">No orders in this selection.</td></tr>`; return; }
   const pill = x => `<span class="pill ${x.pmNo || x.rmNo ? "no" : x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
   const pm = S.step1.sel.col !== "out";
-  const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="12" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
+  const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="13" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
+  S.shown1 = shown;
+  $("hint1").hidden = !pm;
   t.innerHTML = orders
-    ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th>${pm ? `<th class="num">Wrkord. No.</th><th>Clear (RM)</th><th>Clear (PM)</th>` : ""}<th>Status</th></tr></thead><tbody>` +
-      shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td>${pm ? `<td class="num">${x.bc[0]}</td><td>${yn(x.bc[7])}</td><td>${yn(x.bc[8])}</td>` : ""}<td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`
+    ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th>${pm ? `<th class="num">Wrkord. No.</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Short items</th>` : ""}<th>Status</th></tr></thead><tbody>` +
+      shown.map((x,i) => { const r = x.r; return `<tr${pm ? ` class="line" data-i="${i}"` : ""}><td class="num code">${i+1}</td><td class="code">${esc(r[9])}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td>${esc(r[10])}</td><td>${esc(r[11])}</td><td class="num">${fmtN(r[6])}</td>${pm ? `<td class="num">${x.bc[0]}</td><td>${yn(x.bc[7])}</td><td>${yn(x.bc[8])}</td><td class="shorts">${shortSummary(x.bc)}</td>` : ""}<td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`
     : `<thead><tr><th class="num">#</th><th>Wrkord. No.</th><th>Wrkord. Dt.</th><th>Product Code</th><th>Product Name</th><th class="num">Wrkord. Qty</th><th>Clear (RM)</th><th>Clear (PM)</th><th>Status</th></tr></thead><tbody>` +
       shown.map((x,i) => { const r = x.r; return `<tr><td class="num code">${i+1}</td><td class="num">${r[0]}</td><td>${esc(fmtDate(r[1]))}</td><td class="code">${esc(r[4])}</td><td class="prod">${esc(r[5])}</td><td class="num">${fmtN(r[6])}</td><td>${yn(r[7])}</td><td>${yn(r[8])}</td><td>${pill(x)}</td></tr>`; }).join("") + more + `</tbody>`;
 }
@@ -457,6 +460,16 @@ function pickCell1(td){
   drawGrid1(); drawTable1();
   $("cap1").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"});
 }
+$("t1").addEventListener("click", e => {
+  const tr = e.target.closest("tr.line"); if (!tr) return;
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("detail")){ next.remove(); tr.classList.remove("open"); return; }
+  const x = S.shown1[Number(tr.dataset.i)]; if (!x?.bc) return;
+  const sh = shortRowsOf(x.bc);
+  const d = document.createElement("tr"); d.className = "detail";
+  d.innerHTML = `<td colspan="13">${sh.length ? `<b>${esc(x.r[5])}</b>, WO ${x.bc[0]}: ${sh.length} item${sh.length>1?"s":""} short<div class="tablebox" style="max-height:none;margin-top:6px">${materialTable(sh)}</div>` : `<span class="note">No Details row shows a shortage for this work order.</span>`}</td>`;
+  tr.after(d); tr.classList.add("open");
+});
 $("grid1").addEventListener("click", e => { const td = e.target.closest("td[data-col]"); if (td) pickCell1(td); });
 $("grid1").addEventListener("keydown", e => { const td = e.target.closest("td[data-col]"); if (td && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); pickCell1(td); } });
 const stat = (n, label, hi) => `<div class="stat${hi?" hi":""}"><b>${Number(n).toLocaleString("en-IN")}</b><span>${esc(label)}</span></div>`;
@@ -681,8 +694,13 @@ async function makeOrdersWorkbook(lines, label){
   const wb = new ExcelJS.Workbook();
   const meta = { company: S.B.concise.company || S.P.concise.company, title: S.B.concise.title, footer: S.B.concise.footer,
     header: [...S.B.concise.header, "Order No", "Party Name", "Product Type", "Pending Qty", "Status"] };
-  const rows = lines.map(({r, why, bc}) => { const o = [...r.slice(0, 13), why]; if (bc){ o[0] = bc[0]; o[7] = bc[7]; o[8] = bc[8]; } return o; });
-  buildSheet(wb, "Concise", meta, rows, 14, [...COLS_C, 16, 40, 14, 12, 26], label);
+  const withShort = lines.some(x => x.bc) && !!S.B.details;
+  if (withShort) meta.header.push("RM Short Items", "PM Short Items");
+  const shortTxt = arr => arr.map(d => `${itemName(d)} (${qtyTxt(d)})`).join("; ") || null;
+  const rows = lines.map(({r, why, bc}) => { const o = [...r.slice(0, 13), why]; if (bc){ o[0] = bc[0]; o[7] = bc[7]; o[8] = bc[8]; }
+    if (withShort){ const sh = bc ? shortRowsOf(bc) : []; o.push(shortTxt(sh.filter(isRM)), shortTxt(sh.filter(d => !isRM(d)))); }
+    return o; });
+  buildSheet(wb, "Concise", meta, rows, withShort ? 16 : 14, [...COLS_C, 16, 40, 14, 12, 26, 60, 60], label);
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), detailCount: 0 };
 }
