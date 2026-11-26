@@ -153,7 +153,7 @@ td.bad{color:var(--bad);font-weight:600}
       <div id="r1" hidden>
         <div class="stats" id="stats1"></div>
         <div style="margin-top:14px;overflow-x:auto"><table class="grid-rmpm" id="grid1"></table></div>
-        <p class="note" style="margin:6px 0 0">Month-wise count of pending orders that are not in the batch clearance, and of those in it with PM clear = No. Click any number to see its list below.</p>
+        <p class="note" style="margin:6px 0 0">Month-wise count of pending orders that are not in the batch clearance, and of those in it with PM clear = No or RM clear = No. An order with both not clear is counted in both columns. Click any number to see its list below.</p>
         <div class="row listhead" style="margin-top:12px">
           <span id="cap1" class="cap"></span>
           <button id="dl1">Download this list</button>
@@ -404,7 +404,8 @@ function runStep1(){
   }
   for (const x of all){ // month of the approval / work order date
     x.pmNo = !!x.bc && x.bc[8] === "No";
-    if (x.pmNo) x.why = "PM not clear";
+    x.rmNo = !!x.bc && x.bc[7] === "No";
+    if (x.pmNo || x.rmNo) x.why = x.pmNo && x.rmNo ? "RM and PM not clear" : x.rmNo ? "RM not clear" : "PM not clear";
     const d = serialToDate(x.r[1]);
     x.month = (d instanceof Date && !isNaN(d)) ? `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}` : "none";
   }
@@ -415,15 +416,15 @@ function runStep1(){
   $("stats1").innerHTML =
     stat(all.length, orders ? "Pending orders" : "Pendency lines") + stat(S.B.concise.data.length, "Batch clearance lines") +
     stat(tagged.length, "Pending, not in BC", true) + stat(noWO, "No work order yet") + stat(tagged.length - noWO, "Work order at a different qty") +
-    stat(all.filter(x => x.pmNo).length, "In BC, PM not clear");
+    stat(all.filter(x => x.pmNo).length, "In BC, PM not clear") + stat(all.filter(x => x.rmNo).length, "In BC, RM not clear");
   drawGrid1(); drawTable1();
   $("f1").classList.add("done");
 }
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const monthName = k => k === "none" ? "No date" : `${MONTHS[Number(k.slice(5)) - 1]} ${k.slice(0,4)}`;
-const COL1 = { out:"Not in batch clearance", pm:"PM not clear" };
+const COL1 = { out:"Not in batch clearance", pm:"PM not clear", rm:"RM not clear" };
 function list1(sel = S.step1.sel){
-  return S.step1.all.filter(x => (!sel.month || x.month === sel.month) && (sel.col === "pm" ? x.pmNo : !x.inBC));
+  return S.step1.all.filter(x => (!sel.month || x.month === sel.month) && (sel.col === "pm" ? x.pmNo : sel.col === "rm" ? x.rmNo : !x.inBC));
 }
 function drawGrid1(){
   const { all, sel } = S.step1;
@@ -432,9 +433,9 @@ function drawGrid1(){
     const n = list1({month, col}).length, on = sel.month === month && sel.col === col;
     return `<td class="num click${on?" on":""}" data-month="${month || ""}" data-col="${col}" tabindex="0" role="button" aria-label="Show ${n} orders">${bold?`<b>${n}</b>`:n}</td>`;
   };
-  $("grid1").innerHTML = `<thead><tr><th>${S.P.kind === "orders" ? "Approval month" : "Work order month"}</th><th class="num">Not in batch clearance</th><th class="num">In batch clearance, PM not clear</th></tr></thead><tbody>` +
-    months.map(m => `<tr><td>${monthName(m)}</td>${cell(m,"out")}${cell(m,"pm")}</tr>`).join("") +
-    `<tr><td><b>Total</b></td>${cell(null,"out",true)}${cell(null,"pm",true)}</tr></tbody>`;
+  $("grid1").innerHTML = `<thead><tr><th>${S.P.kind === "orders" ? "Approval month" : "Work order month"}</th><th class="num">Not in batch clearance</th><th class="num">In batch clearance, PM not clear</th><th class="num">In batch clearance, RM not clear</th></tr></thead><tbody>` +
+    months.map(m => `<tr><td>${monthName(m)}</td>${cell(m,"out")}${cell(m,"pm")}${cell(m,"rm")}</tr>`).join("") +
+    `<tr><td><b>Total</b></td>${cell(null,"out",true)}${cell(null,"pm",true)}${cell(null,"rm",true)}</tr></tbody>`;
 }
 const label1 = () => `${S.step1.sel.month ? monthName(S.step1.sel.month) : "All months"} - ${COL1[S.step1.sel.col]}`;
 function drawTable1(){
@@ -442,8 +443,8 @@ function drawTable1(){
   $("cap1").innerHTML = `<b>${list.length.toLocaleString("en-IN")} ${orders ? "orders" : "lines"}</b> · ${esc(label1().replace(" - ", " · "))}`;
   $("dl1").disabled = !list.length;
   if (!list.length){ t.innerHTML = `<tr><td class="empty">No orders in this selection.</td></tr>`; return; }
-  const pill = x => `<span class="pill ${x.pmNo ? "no" : x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
-  const pm = S.step1.sel.col === "pm";
+  const pill = x => `<span class="pill ${x.pmNo || x.rmNo ? "no" : x.inBC ? "yes" : x.why === "No work order" ? "warn" : "neutral"}">${esc(x.why)}</span>`;
+  const pm = S.step1.sel.col !== "out";
   const shown = list.slice(0, 400), more = list.length > shown.length ? `<tr><td colspan="12" class="note">Showing 400 of ${list.length}. Download this list for all rows.</td></tr>` : "";
   t.innerHTML = orders
     ? `<thead><tr><th class="num">#</th><th>Order No</th><th>Approval Date</th><th>Product Code</th><th>Product Name</th><th>Party</th><th>Type</th><th class="num">Planned Qty</th>${pm ? `<th class="num">Wrkord. No.</th><th>Clear (RM)</th><th>Clear (PM)</th>` : ""}<th>Status</th></tr></thead><tbody>` +
